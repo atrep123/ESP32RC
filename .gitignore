@@ -5,6 +5,9 @@
 .vscode/launch.json
 .vscode/ipch
 
+# CodeQL
+_codeql_detected_source_root
+
 # Build artifacts
 *.o
 *.elf
