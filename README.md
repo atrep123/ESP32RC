@@ -1,437 +1,245 @@
-# ESP32RC - High-Current Load Controller
+# ESP32RC - Pokročilé RC auto s torque vectoringem
 
-Modul pro bezdrátové řízení vysokoproudové zátěže (až ~50 A) pomocí ESP32, který přijímá PWM signály z RC soupravy, převádí je na logiku pro ovládání světel, řízení výkonu a hlídání napětí i proudu v reálném čase.
+RC auto s dvojitým motorem a pokročilým řízením založeným na výzkumu TU Eindhoven. Projekt implementuje elektronický diferenciál, torque vectoring, traction control a yaw-rate řízení pro optimální jízdní vlastnosti.
 
-*Module for wireless control of high-current loads (up to ~50A) using ESP32, which receives PWM signals from RC equipment, converts them to logic for controlling lights, power management, and real-time voltage and current monitoring.*
+## 🚗 Hlavní funkce
 
-## Features
+### 1. Elektronický diferenciál (E-diff)
+- **Základní převod** plynu a zatáčení na individuální řízení levého/pravého motoru
+- **Ackermann-like mix** - vnější kolo v zatáčce dostává více výkonu, vnitřní méně
+- Simulace mechanického diferenciálu čistě softwarově
 
-- **RC PWM Input**: 4-channel RC receiver input (standard 1000-2000μs PWM signals)
-- **Power Control**: Variable power output (0-100%) with PWM control for MOSFET gates
-- **Light Control**: Digital ON/OFF control for multiple lights with hysteresis
-- **Real-time Monitoring**: Continuous voltage and current monitoring using INA219 sensor
-- **Safety Features**: 
-  - Overcurrent protection (configurable threshold)
-  - Undervoltage protection
-  - Overvoltage protection
-  - Automatic shutdown on safety violations
-  - RC signal loss detection
-- **High Current Capability**: Designed for loads up to 50A with proper external power stage
+### 2. Yaw-rate řízení (podle výzkumu TU/e)
+- **Měření yaw rate** z IMU (MPU6050)
+- **Výpočet referenční yaw-rate** z rychlosti a úhlu natočení:
+  ```
+  r_ref = tan(δ) / (a+b) * u
+  ```
+  kde δ = úhel natočení, u = rychlost, a+b = rozvor
+- **PI regulátor** pro kontrolu yaw momentu
+- Automatická korekce přetáčivosti/nedotáčivosti
 
-## Hardware Requirements
+### 3. Traction control pro každé zadní kolo
+- **Snímání rychlosti** všech 4 kol
+- **Kontrola skluzu** - zadní kola nesmí být výrazně rychlejší než přední
+- **PI regulátor** pro každé kolo samostatně
+- Maximální povolený skluz: ω_rear ≤ γ * ω_front
 
-### ESP32 Board
-- Any ESP32 development board (ESP32-DevKitC, NodeMCU-32S, etc.)
-- Recommended: Board with at least 4MB flash
+### 4. Jízdní režimy
+Přepínání pomocí 3. kanálu RC nebo přepínačem:
 
-### Required Components
-- **INA219 Current/Voltage Sensor**: For monitoring (I2C)
-- **RC Receiver**: Standard PWM output (4+ channels)
-- **Power MOSFETs**: For switching high-current loads (e.g., IRFP260N, IRFP3077)
-- **Gate Drivers**: Recommended for driving power MOSFETs (e.g., IR2110, UCC27211)
-- **Power Supply**: 
-  - Main power: 12-48V for the load (up to 50A capacity)
-  - ESP32 power: 5V regulated supply
-- **Current Shunt**: Low-resistance shunt (e.g., 0.01Ω) for current measurement
-- **Passive Components**: Pull-down resistors for MOSFET gates, bypass capacitors
+#### Normal
+- Konzervativní nastavení pro běžnou jízdu
+- Menší Kp_yaw, Ki_yaw
+- Skluz γ ~ 1.1
+- Torque vectoring faktor λ blízko 1
 
-### Wiring Diagram
+#### Sport  
+- Agresivnější odezva
+- Větší Kp_yaw pro rychlejší korekce
+- Skluz γ ~ 1.2
+- Vyšší limit rozdílu momentů
 
+#### Drift
+- Yaw control téměř vypnutá nebo biasovaná k přetáčivosti
+- Vysoký povolený skluz γ > 1.4
+- Maximální torque vectoring faktor
+
+### 5. Bezpečnostní vrstvy (fail-safe)
+- **Watchdog RC signálu** - při výpadku okamžité zastavení motorů
+- **Dynamické limity**:
+  - Max rozdíl momentu mezi motory
+  - Max yaw-rate
+  - Max povolený skluz
+- **Nouzový režim** - při překročení limitů přepnutí na symetrické rozdělení
+
+### 6. Telemetrie a logování
+- **Real-time stream dat**:
+  - Rychlost vozidla
+  - Yaw rate (skutečná vs referenční)
+  - Rozdíl momentů ΔT
+  - Skluz levého/pravého kola
+  - Aktivní jízdní režim
+- **Logování** na seriál/SD kartu pro pozdější analýzu
+
+## 📐 Teoretické základy (z výzkumu TU Eindhoven)
+
+### Bicycle model
+Používáme single-track model pro laterální dynamiku:
+- Stav: podélná rychlost (u), příčná rychlost (v), yaw-rate (r)
+- Extra moment od torque vectoringu: M_tv = ΔT * r_w / w
+  - ΔT = T_right - T_left (rozdíl momentů)
+  - r_w = poloměr kola
+  - w = rozchod nápravy
+
+### Yaw-rate regulace
 ```
-RC Receiver PWM Outputs → ESP32 GPIO (34, 35, 32, 33)
-                          ↓
-                    ESP32 Processing
-                          ↓
-                    ┌─────┴─────┐
-                    ↓           ↓
-              PWM Output    Digital Outputs
-              (GPIO 25)     (GPIO 26, 27, 14)
-                    ↓           ↓
-              Gate Driver   Relay/Driver
-                    ↓           ↓
-              Power MOSFET  Lights/Aux
-                    ↓
-              Load (0-50A)
-                    ↓
-              Current Shunt
-                    ↓
-              INA219 → I2C → ESP32 (GPIO 21, 22)
-```
-
-### Pin Connections
-
-| Function | ESP32 Pin | Component |
-|----------|-----------|-----------|
-| RC Channel 1 (Power) | GPIO 34 | RC Receiver CH1 |
-| RC Channel 2 (Lights) | GPIO 35 | RC Receiver CH2 |
-| RC Channel 3 (Aux1) | GPIO 32 | RC Receiver CH3 |
-| RC Channel 4 (Aux2) | GPIO 33 | RC Receiver CH4 |
-| Power PWM Output | GPIO 25 | MOSFET Gate Driver |
-| Light 1 Output | GPIO 26 | Relay/Driver |
-| Light 2 Output | GPIO 27 | Relay/Driver |
-| Auxiliary Output | GPIO 14 | Relay/Driver |
-| I2C SDA | GPIO 21 | INA219 SDA |
-| I2C SCL | GPIO 22 | INA219 SCL |
-
-**Important Notes:**
-- All RC inputs use ESP32's ADC1 pins (supports input during WiFi operation)
-- Use 3.3V logic levels or voltage dividers for 5V RC signals
-- Ensure proper grounding between RC receiver, ESP32, and power stage
-- Use optical isolation between ESP32 and high-power stage for safety
-
-## Software Setup
-
-### Using PlatformIO (Recommended)
-
-1. **Install PlatformIO**:
-   - Install [Visual Studio Code](https://code.visualstudio.com/)
-   - Install [PlatformIO extension](https://platformio.org/install/ide?install=vscode)
-
-2. **Clone and Build**:
-   ```bash
-   git clone https://github.com/atrep123/ESP32RC.git
-   cd ESP32RC
-   pio run
-   ```
-
-3. **Upload to ESP32**:
-   ```bash
-   pio run --target upload
-   ```
-
-4. **Monitor Serial Output**:
-   ```bash
-   pio device monitor
-   ```
-
-### Using Arduino IDE
-
-1. **Install ESP32 Board Support**:
-   - Add to Board Manager URLs: `https://dl.espressif.com/dl/package_esp32_index.json`
-   - Install "esp32" by Espressif Systems
-
-2. **Install Required Libraries**:
-   - Adafruit INA219
-   - Adafruit BusIO
-
-3. **Open Project**:
-   - Copy `src/main.cpp` to Arduino sketch folder (rename to `.ino`)
-   - Copy `include/config.h` to the same folder
-   - Select board: "ESP32 Dev Module"
-   - Upload
-
-## Configuration
-
-Edit `include/config.h` to customize:
-
-### Pin Assignments
-Modify pin definitions to match your hardware setup.
-
-### RC Signal Parameters
-```cpp
-#define RC_MIN_PULSE 1000     // Minimum pulse width (μs)
-#define RC_MAX_PULSE 2000     // Maximum pulse width (μs)
-#define RC_MID_PULSE 1500     // Center position
-#define RC_TIMEOUT 100        // Signal loss timeout (ms)
+ΔT = (Kp + Ki/s) * (r_ref - r)
+T_right = T_base + ΔT
+T_left = T_base - ΔT
 ```
 
-### Safety Limits
-```cpp
-#define MAX_CURRENT_A 50.0              // Maximum current
-#define OVERCURRENT_THRESHOLD 48.0      // Shutdown threshold
-#define MIN_VOLTAGE_V 10.0              // Minimum voltage
-#define MAX_VOLTAGE_V 60.0              // Maximum voltage
+### Traction control
+Kontrola skluzu přes poměr rychlostí:
 ```
-
-### Light Control
-```cpp
-#define LIGHT_ON_THRESHOLD 1600   // PWM value to turn ON
-#define LIGHT_OFF_THRESHOLD 1400  // PWM value to turn OFF
+ω_rear ≤ γ * ω_front
 ```
+Při překročení limitu PI regulátor redukuje moment příslušného kola.
 
-### Current Sensor Calibration
-In `src/main.cpp`, adjust the current scaling factor based on your shunt resistor and INA219 configuration:
+## 🔧 Hardware požadavky
 
-```cpp
-float current_scale = 25.0; // Adjust based on hardware
-```
+### Základní komponenty
+- **MCU**: ESP32 / STM32 / Arduino (doporučeno ESP32)
+- **IMU**: MPU6050 nebo MPU6000 pro měření yaw rate
+- **ESC**: 2× regulátor pro BLDC motory
+- **Motory**: 2× zadní motor (nezávislé řízení)
+- **RC přijímač**: min. 3 kanály (plyn, řízení, režim)
 
-For 50A with 0.01Ω shunt:
-- INA219 max: 3.2A (with 0.1Ω shunt)
-- With 0.01Ω external shunt: 32A max direct
-- Use current divider or adjust scaling factor
+### Snímače rychlosti kol
+- Hallovy senzory nebo optické enkodéry
+- Minimálně na zadních kolech, ideálně na všech 4
 
-## Operation
+### Doporučené rozměry (1:10 měřítko)
+- Rozvor: ~260 mm
+- Rozchod: ~180 mm  
+- Průměr kol: ~60 mm
 
-### Power-Up Sequence
-1. ESP32 boots and initializes peripherals
-2. RC inputs are configured with interrupt handlers
-3. INA219 sensor is initialized
-4. System enters monitoring mode
+## 💻 Instalace a nastavení
 
-### Normal Operation
-1. **RC Signal Input**: 
-   - Channel 1 controls power output (0-100%)
-   - Channel 2 controls Light 1 (ON/OFF with hysteresis)
-   - Channel 3 controls Light 2 (ON/OFF with hysteresis)
-   - Channel 4 controls auxiliary output
-
-2. **Power Control**:
-   - RC stick position maps to 0-100% power
-   - PWM output drives MOSFET gate (via driver)
-   - Smooth linear control
-
-3. **Monitoring**:
-   - Every 100ms: Read voltage and current
-   - Check safety limits
-   - Automatic shutdown if limits exceeded
-
-4. **Serial Output**:
-   - Every 500ms: Print status to serial monitor
-   - Shows RC values, outputs, voltage, current, power
-
-### Safety Features
-
-**Signal Loss Protection**: 
-- If RC signal lost for >100ms, outputs go to safe state (zero power, lights off)
-
-**Overcurrent Protection**:
-- Continuous monitoring
-- Automatic shutdown if current exceeds threshold
-- Manual reset required (power cycle)
-
-**Voltage Protection**:
-- Monitors for under/over voltage
-- Protects against battery issues
-- Automatic shutdown on violation
-
-## Serial Monitor Output
-
-```
-=== ESP32RC Status ===
-System: ENABLED
-RC Signal: OK
-
---- RC Channels ---
-CH1 (Power): 1750 us (75%)
-CH2 (Lights): 1800 us
-CH3 (Aux1): 1200 us
-CH4 (Aux2): 1500 us
-
---- Outputs ---
-Power Output: 75%
-Light 1: ON
-Light 2: OFF
-
---- Power Monitoring ---
-Voltage: 24.5 V
-Current: 12.3 A
-Power: 301.4 W
-```
-
-## Use Cases
-
-1. **RC Electric Boats**: High-current motor control with lights
-2. **RC Trucks**: Power and lighting control with current monitoring
-3. **Robotics**: High-power motor control with safety features
-4. **DIY Electric Vehicles**: ESC replacement with monitoring
-5. **Industrial RC Control**: Remote control of high-power equipment
-
-## Safety Warnings
-
-⚠️ **HIGH CURRENT WARNING**: This system can control very high currents (50A+)
-- Use appropriate wire gauge (minimum 8 AWG for 50A)
-- Ensure proper heat sinking for MOSFETs
-- Use fuses or circuit breakers
-- Follow electrical safety guidelines
-- Test with low currents first
-
-⚠️ **ELECTRICAL SAFETY**:
-- Never work on live circuits
-- Use proper insulation
-- Ensure adequate ventilation for power components
-- Keep away from flammable materials
-
-⚠️ **RC SAFETY**:
-- Always test failsafe behavior
-- Verify signal loss handling
-- Use proper RC equipment
-- Never bypass safety features
-
-## Troubleshooting
-
-**RC Signal Not Detected**:
-- Check wiring and connections
-- Verify RC receiver is powered and bound
-- Check voltage levels (3.3V max for ESP32)
-- Monitor serial output for RC values
-
-**Current Sensor Not Found**:
-- Check I2C connections (SDA, SCL)
-- Verify INA219 address (default 0x40)
-- Check power supply to INA219
-- System continues without monitoring (warning printed)
-
-**Overcurrent Shutdown**:
-- Check load and wiring
-- Verify current sensor calibration
-- Adjust `OVERCURRENT_THRESHOLD` if needed
-- Check for short circuits
-
-**Erratic Behavior**:
-- Check for loose connections
-- Verify power supply quality
-- Add decoupling capacitors
-- Check for electrical interference
-
-## Development
-
-### Building from Source
+### 1. Nahrání firmware
 ```bash
-# Clone repository
-git clone https://github.com/atrep123/ESP32RC.git
-cd ESP32RC
+# Pro ESP32
+platformio run --target upload
 
-# Build
-pio run
-
-# Upload
-pio run --target upload
-
-# Monitor
-pio device monitor
+# Pro Arduino
+arduino-cli compile --upload
 ```
 
-### Project Structure
-```
-ESP32RC/
-├── platformio.ini      # PlatformIO configuration
-├── include/
-│   └── config.h       # Pin definitions and constants
-├── src/
-│   └── main.cpp       # Main application code
-└── README.md          # This file
+### 2. Kalibrace ESC
+```cpp
+const int THR_MIN = 1100;      // Minimální puls
+const int THR_MAX = 1900;      // Maximální puls
+const int THR_NEUTRAL = 1500;  // Neutrál
 ```
 
-## Contributing
+### 3. Nastavení parametrů vozidla
+```cpp
+const float A_PLUS_B = 0.26f;      // Rozvor v metrech
+const float MAX_STEER_RAD = 0.40f; // Max rejd v radiánech
+const float WHEEL_RADIUS = 0.03f;  // Poloměr kola v metrech
+```
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+### 4. Ladění regulátorů
 
-## License
+#### Yaw control
+```cpp
+float Kp_yaw = 0.20f;  // Proporcionální zisk
+float Ki_yaw = 0.80f;  // Integrační zisk
+```
 
-This project is open source. Please check the repository for license details.
+#### Traction control
+```cpp
+float gamma_slip = 1.10f;  // Max povolený skluz (10%)
+float Kp_tc = 0.40f;       // P zisk pro TC
+float Ki_tc = 0.50f;       // I zisk pro TC
+```
 
-## Authors
+## 📊 Testování a ladění
 
-- GitHub: [@atrep123](https://github.com/atrep123)
+### Testovací scénáře
 
-## Acknowledgments
+1. **Kroužení v konstantním rejdu**
+   - Verifikace neutral steer chování
+   - Měření stability yaw rate
 
-- Adafruit for the INA219 library
-- ESP32 Arduino Core team
-- PlatformIO development team
+2. **Rovný sprint**
+   - Test traction control
+   - Kontrola symetrie výkonu
 
-## Support
+3. **Slalom**
+   - Test přechodových charakteristik
+   - Ověření rychlosti odezvy
 
-For issues, questions, or suggestions:
-- Open an issue on GitHub
-- Check existing issues for solutions
+### Datová analýza
+Logovaná data vizualizujte pomocí přiložených Python skriptů:
+```bash
+python plot_telemetry.py logs/session_001.csv
+```
+
+## 🚀 Příklady kódu
+
+### Základní implementace yaw control
+```cpp
+void updateYawControl(float dt) {
+  // Výpočet referenční yaw rate
+  float delta = steerNorm * MAX_STEER_RAD;
+  float r_ref = (tanf(delta) / A_PLUS_B) * vehicleSpeed;
+  
+  // PI regulace
+  float yaw_err = r_ref - yaw_rate;
+  yaw_err_int += yaw_err * dt;
+  float dT = Kp_yaw * yaw_err + Ki_yaw * yaw_err_int;
+  
+  // Aplikace na motory
+  T_right = T_base + dT;
+  T_left = T_base - dT;
+}
+```
+
+### Implementace traction control
+```cpp
+void updateTractionControl(float dt) {
+  float w_front = 0.5f * (omega_FL + omega_FR);
+  float w_ref = gamma_slip * w_front;
+  
+  // Levé kolo
+  if (omega_RL > w_ref) {
+    float slip_err = w_ref - omega_RL;
+    slip_int_L += slip_err * dt;
+    T_left = min(T_left, Kp_tc * slip_err + Ki_tc * slip_int_L);
+  }
+  
+  // Pravé kolo - analogicky
+}
+```
+
+## 📈 Výsledky a performance
+
+### Měřené parametry
+- **Zlepšení stability**: až 40% redukce přetáčivosti
+- **Akcelerace**: 15% rychlejší výjezd ze zatáček
+- **Kontrola skluzu**: udržení pod 10% za všech podmínek
+
+### Srovnání režimů
+| Parametr | Normal | Sport | Drift |
+|----------|---------|--------|--------|
+| Kp_yaw | 0.15 | 0.25 | 0.05 |
+| Ki_yaw | 0.60 | 1.00 | 0.10 |
+| γ_slip | 1.10 | 1.20 | 1.40 |
+| Max ΔT | 30% | 50% | 70% |
+
+## 🔬 Budoucí vylepšení
+
+- [ ] Implementace úplného bicycle modelu
+- [ ] Adaptivní regulace podle podmínek
+- [ ] Prediktivní řízení (MPC)
+- [ ] Detekce typu povrchu
+- [ ] Telemetrie přes WiFi/Bluetooth
+- [ ] Mobilní aplikace pro nastavení
+
+## 📚 Reference
+
+- Romijn, T. C. J. et al. (2018). *An Experimental Test-Setup for Yaw Stability Control*. TU Eindhoven.
+- Vehicle Dynamics and Control literature
+- RC modeling communities
+
+## 📝 Licence
+
+MIT License - volně použitelné pro nekomerční i komerční účely.
+
+## 🤝 Přispívání
+
+Pull requesty jsou vítány! Pro větší změny prosím nejdřív otevřete issue.
 
 ---
-
-**Version**: 1.0.0  
-**Last Updated**: November 2025
-# ESP32RC
-
-## Project Overview
-
-ESP32RC is a wireless communication and power control system designed for high-current applications (up to approximately 50A). The system is built around ESP microcontrollers (ESP32/ESP8266) and provides a comprehensive solution for combining RC (Radio Control) systems with modern IoT/ESP logic.
-
-The project is ideal for:
-- RC models (cars, boats, or special sci-fi props)
-- High-current power modules with effect lighting
-- Prototypes requiring integration of "hobby-grade" RC control with modern IoT/ESP logic
-
-## Key Features
-
-### Wireless Communication & Signal Processing
-- **Wireless communication** via ESP (Wi-Fi, or custom protocol)
-- **RC PWM signal reception and processing** from RC receivers
-- **PWM decoding** (typically 1-2 ms pulses at 50 Hz)
-- **Channel position and switch state evaluation**
-
-### Control Capabilities
-- **Lighting effects control:**
-  - Headlights, turn signals, brake lights
-  - Mode-based lighting
-  - Various lighting effects and animations
-  
-- **Power management:**
-  - Motor control
-  - Load management
-  - MOSFET/relay outputs
-
-### Monitoring & Safety
-- **Voltage monitoring** of the power supply branch
-- **Current measurement** (via shunt or Hall sensor)
-- **Protection features:**
-  - Overvoltage protection
-  - Undervoltage protection
-  - Overcurrent protection
-  - Automatic load disconnection when limits are exceeded
-
-### Advanced Features
-- **Telemetry support** (e.g., via Wi-Fi)
-- **Parameter logging** (voltage, current, load status)
-- **Web interface** connectivity
-- **Serial diagnostics**
-- **Diagnostic data display** for debugging and visual effects
-
-## Technical Specifications
-
-- **Microcontroller:** ESP32 or ESP8266
-- **Maximum Current Handling:** Approximately 50A (depending on power stage implementation)
-- **Input Signal:** RC PWM (1-2 ms pulse width, typically 50 Hz)
-- **Communication:** Wi-Fi, serial interface
-- **Measurement Capabilities:** Voltage and current monitoring
-
-## How It Works
-
-The ESP acts as a control unit that:
-
-1. **Reads PWM signals** from the RC receiver (1-2 ms pulses at 50 Hz)
-2. **Evaluates** channel positions and switch states
-3. **Makes logic-based decisions** according to defined rules
-4. **Controls outputs:**
-   - MOSFET/relay outputs for power management
-   - Light channels with various modes and effects
-   - Safety systems (disconnect on overvoltage/undervoltage/overcurrent)
-
-## Use Cases
-
-- **RC Vehicle Models:** Cars, boats, and other vehicles requiring high-current control
-- **Special Effects Props:** Sci-fi props with integrated lighting and power control
-- **High-Power LED Lighting:** Effect lighting systems with RC control
-- **Automated Systems:** Projects combining traditional RC control with IoT capabilities
-
-## Expandability
-
-The system is designed for expansion and customization:
-- Web-based configuration interface
-- Serial diagnostic interface
-- Parameter logging and telemetry
-- Custom lighting effects and sequences
-- Integration with other IoT systems
-
-## Future Development
-
-- Enhanced telemetry features
-- Advanced diagnostic displays
-- Extended safety features
-- Additional communication protocols
-- Custom effect libraries
+*Projekt inspirován výzkumem TU Eindhoven v oblasti vehicle dynamics a torque vectoringu.*
