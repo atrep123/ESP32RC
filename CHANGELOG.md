@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-06
+
 ### Added
 - Added a dedicated bring-up checklist in `docs/BRINGUP.md` for first flash and first hardware power-up.
 - Added a `legacy/` folder with a small README for older standalone Arduino sketches kept only for reference.
@@ -117,6 +119,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OLED display support
 
 ## Release Notes
+
+### Version 1.1.0
+This release hardens the runtime safety behavior of the active PlatformIO firmware and aligns the repository around that firmware as the source of truth.
+
+Highlights:
+- Safe startup behavior with no output before the first valid `CH1` pulse
+- Throttle gated strictly by live `CH1` data
+- Optional serial self-test firmware for bring-up without a live RC transmitter
+- Runtime and persisted current-scale calibration using ESP32 `Preferences`
+- Cleaned repository layout with legacy sketches moved out of the root
+- GitHub Actions build coverage for both PlatformIO environments
 
 ### Version 1.0.0
 This is the initial stable release of ESP32RC. The system has been designed with safety as the top priority and includes comprehensive protection features for high-current applications. All core features are implemented and tested for safety-critical behavior.
