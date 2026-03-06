@@ -76,6 +76,7 @@ It also exposes sensor and current-scale calibration commands over serial, inclu
 - `docs/HARDWARE.md`
 - `docs/EXAMPLES.md`
 - `docs/ARCHITECTURE.md`
+- `docs/RELEASING.md`
 
 ## License
 

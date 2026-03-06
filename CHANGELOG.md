@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added a GitHub Actions release workflow that can publish releases from tags or via manual dispatch.
 - Added a checked-in release notes file for `v1.1.0`.
+- Added `docs/RELEASING.md` to document the release and tag workflow.
 
 ## [1.1.0] - 2026-03-06
 

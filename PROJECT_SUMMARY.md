@@ -57,3 +57,4 @@ Systems above that need different voltage sensing and updated firmware limits.
 - `docs/HARDWARE.md`: wiring and component notes
 - `docs/EXAMPLES.md`: example use cases
 - `docs/ARCHITECTURE.md`: control-flow and safety diagrams
+- `docs/RELEASING.md`: release and tag publication flow
