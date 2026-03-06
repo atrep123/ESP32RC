@@ -5,6 +5,27 @@ All notable changes to the ESP32RC project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Added a dedicated bring-up checklist in `docs/BRINGUP.md` for first flash and first hardware power-up.
+- Added a `legacy/` folder with a small README for older standalone Arduino sketches kept only for reference.
+- Added an `esp32dev_selftest` PlatformIO environment for serial-controlled output bring-up without a live RC signal.
+- Added self-test serial commands for INA219 inspection and runtime current-scale tuning.
+- Added persistence for calibrated current scale using ESP32 `Preferences`.
+
+### Changed
+- Updated the main documentation to describe the active PlatformIO firmware in `src/main.cpp`.
+- Moved old experimental `.ino` sketches out of the repository root into `legacy/`.
+- Updated the stock monitored voltage limit in documentation and config to `26V` to match the default INA219-based monitoring path.
+- Added an opt-in serial self-test mode gated behind the self-test build configuration.
+
+### Fixed
+- Fixed a startup failsafe issue where default RC values could allow non-zero PWM before the first valid `CH1` pulse.
+- Fixed throttle validation so power output depends on fresh `CH1` data instead of unrelated active channels.
+- Fixed ISR-shared RC timestamp handling by treating those values as interrupt-updated state.
+- Fixed repeated INA219 reads when the sensor is not present.
+
 ## [1.0.0] - 2025-11-20
 
 ### Added

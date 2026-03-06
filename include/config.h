@@ -32,8 +32,20 @@
 // Safety limits
 #define MAX_CURRENT_A 50.0    // Maximum current in Amperes
 #define MIN_VOLTAGE_V 10.0    // Minimum voltage threshold
-#define MAX_VOLTAGE_V 60.0    // Maximum voltage threshold
+#define MAX_VOLTAGE_V 26.0    // INA219 bus measurement limit
 #define OVERCURRENT_THRESHOLD 48.0  // Trigger shutdown at 48A
+
+// Current measurement scaling for an external shunt/divider arrangement
+#define CURRENT_SCALE 25.0
+
+// Optional serial self-test mode for bring-up without a live RC signal
+#ifndef ENABLE_SERIAL_SELF_TEST
+#define ENABLE_SERIAL_SELF_TEST 0
+#endif
+
+#ifndef SELF_TEST_PWM_MAX_PERCENT
+#define SELF_TEST_PWM_MAX_PERCENT 25
+#endif
 
 // Monitoring intervals
 #define MONITOR_INTERVAL 100  // Monitor current/voltage every 100ms
