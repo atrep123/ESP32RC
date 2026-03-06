@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an `esp32dev_selftest` PlatformIO environment for serial-controlled output bring-up without a live RC signal.
 - Added self-test serial commands for INA219 inspection and runtime current-scale tuning.
 - Added persistence for calibrated current scale using ESP32 `Preferences`.
+- Added a GitHub Actions workflow that builds both PlatformIO environments on pushes and pull requests.
 
 ### Changed
 - Updated the main documentation to describe the active PlatformIO firmware in `src/main.cpp`.
