@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish as a GitHub Release
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve release notes
+        id: notes
+        shell: bash
+        run: |
+          notes_path="release-notes/${{ steps.tag.outputs.value }}.md"
+          if [ -f "$notes_path" ]; then
+            echo "body_path=$notes_path" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish release with checked-in notes
+        if: steps.notes.outputs.body_path != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          body_path: ${{ steps.notes.outputs.body_path }}
+          make_latest: true
+
+      - name: Publish release with generated notes
+        if: steps.notes.outputs.body_path == ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          generate_release_notes: true
+          make_latest: true
