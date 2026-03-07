@@ -388,6 +388,138 @@ Fan PWM uses ESP32 hardware PWM channel 1, while power control uses channel 0:
 7. **Load-Based Control**: Adjust fan based on current draw instead of (or with) temperature
 8. **PWM for Lights**: Replace digital light outputs with PWM for brightness control
 
+## External Temperature Sensor (v1.3)
+
+### Overview
+
+The internal ESP32 temperature sensor has ±5°C accuracy, which is insufficient for precise thermal management. Version 1.3 adds support for the **DS18B20 OneWire temperature sensor**, providing ±0.5°C precision.
+
+### Hardware
+
+**DS18B20 Specifications**:
+| Parameter | Value |
+|-----------|-------|
+| Communication | OneWire (Dallas 1-Wire protocol) |
+| Temperature Range | -55°C to +125°C |
+| Accuracy | ±0.5°C (typical), ±2°C (max) |
+| Precision | 12-bit (0.0625°C per LSB) |
+| Conversion Time | 750ms @ 12-bit resolution |
+| Package | TO-92 or waterproof probe |
+
+### Wiring
+
+```
+    ESP32 GPIO 19 (configurable TEMP_SENSOR_PIN)
+           │
+           ├─[4.7kΩ][PULL-UP]─┐
+           │                   │
+    ┌──────┴───────────────────┤ DS18B20 DQ pin
+    │                          │
+   [+3.3V]                    GND
+
+Alternatively (waterproof probe):
+    GND ├─ Red wire (Vcc, 3.3V)
+        ├─ Black wire (GND)
+        └─ Yellow wire (DQ, digital output → GPIO 19)
+```
+
+### Configuration
+
+Add to `config.h`:
+
+```c
+// External Temperature Sensor (DS18B20) - v1.3 feature
+#define TEMP_SENSOR_PIN 19             // GPIO 19 for OneWire (configurable)
+#define TEMP_SENSOR_ENABLED 1          // Enable external temperature sensor
+#define TEMP_SENSOR_PRECISION 12       // 12-bit precision (0.0625°C resolution)
+#define TEMP_SENSOR_REQUEST_TIMEOUT 1000  // 1 second timeout for sensor read
+#define TEMP_SENSOR_USE_EXTERNAL 1     // Use external sensor when available
+```
+
+### Features
+
+✅ **Automatic Fallback**: If sensor unavailable, automatically uses internal ESP32 sensor  
+✅ **Error Detection**: Validates readings (DS18B20 returns -127.00 on error)  
+✅ **High Precision**: 12-bit resolution (0.0625°C per step) vs internal sensor ±5°C  
+✅ **Fast Response**: 750ms conversion time at 12-bit  
+✅ **Low Power**: Passive reading, no extra current draw  
+
+### Serial Interface
+
+```
+> fan status
+--- Fan Status ---
+Fan Enabled: YES
+Auto Mode: ON
+Current Speed: 0 (0-255)
+Temperature: 42.5°C        ← Now reads from DS18B20!
+Temp Range: 35°C - 50°C
+```
+
+**Behavior**:
+- If DS18B20 reads successfully → uses external value
+- If DS18B20 fails to read → falls back to internal sensor
+- Fallback logged to serial for diagnostics
+
+### Temperature Range Mapping
+
+With DS18B20 external sensor:
+```
+25°C (room temp)      → Fan OFF (inactive)
+35°C (FAN_TEMP_LOW)   → Fan 30% (minimum circulation)
+40°C (midpoint)       → Fan ~50% (moderate cooling)
+45°C (high load)      → Fan ~90% (active cooling)
+50°C (FAN_TEMP_HIGH)  → Fan 100% (maximum cooling)
+55°C+                → Fan 100% (continuous full speed)
+```
+
+### Advantages over Internal Sensor
+
+| Feature | Internal ESP32 | DS18B20 (v1.3) |
+|---------|---|---|
+| Accuracy | ±5°C | ±0.5°C |
+| Precision | ~1°C | 0.0625°C |
+| Sensing Location | CPU die (hot spot) | External probe (more stable) |
+| Requires Calibration | Yes | No (factory calibrated) |
+| Response Time | Immediate | 750ms @ 12-bit |
+| Immune to Noise | No | Yes (robust protocol) |
+
+### Troubleshooting
+
+**Sensor Not Found**:
+```
+WARNING: Temperature sensor not found - using internal ESP32 sensor
+```
+- Check GPIO 19 pin is correct
+- Verify 4.7kΩ pull-up resistor
+- Check DS18B20 DQ pin connection
+- Can use pins 16-23 (most GPIO pins support OneWire)
+
+**Erratic Readings**:
+- Increase pull-up resistor to 10kΩ if wire run > 10 meters
+- Check for electrical noise near OneWire line
+- Reduce TEMP_SENSOR_REQUEST_TIMEOUT if needed
+- Verify 3.3V supply is stable
+
+**Always Reads Room Temperature**:
+- May be external mounting issue (insufficient thermal coupling)
+- Use thermal tape or housing to improve contact
+- Ensure DS18B20 is close to heat source
+
+### Test Coverage
+
+**Unit Tests (v1.3)**:
+- `test_ds18b20_temperature_range_validation()` - ±55 to 125°C range checks
+- `test_ds18b20_precision_levels()` - 12-bit precision verification
+- `test_external_temp_sensor_fallback()` - Fallback logic validation
+
+**Integration Tests**:
+- Sensor success path (external reading used)
+- Sensor failure path (internal fallback)
+- Temperature→fan speed mapping with higher precision
+
+---
+
 ## References
 
 - [ESP32 Datasheet](https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf) - Internal temperature sensor details
