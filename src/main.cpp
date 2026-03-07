@@ -74,8 +74,37 @@ float power_mW = 0;
 unsigned long last_monitor_time = 0;
 unsigned long last_serial_update = 0;
 
+// Recovery tracking for safety shutdown
+unsigned long system_fault_time = 0;
+constexpr unsigned long RECOVERY_TIMEOUT_MS = 5000;  // 5 second timeout before recovery attempt
+bool recovery_attempted = false;
+
 void printStatus();
 void readCurrentVoltage();
+
+/**
+ * Atomic helpers for reading volatile RC state shared with ISR
+ */
+unsigned long readRCValue(volatile unsigned long &value) {
+    noInterrupts();
+    unsigned long result = value;
+    interrupts();
+    return result;
+}
+
+unsigned long readRCUpdateTime(volatile unsigned long &update_time) {
+    noInterrupts();
+    unsigned long result = update_time;
+    interrupts();
+    return result;
+}
+
+bool readRCChannelSeen(volatile bool &channel_seen) {
+    noInterrupts();
+    bool result = channel_seen;
+    interrupts();
+    return result;
+}
 
 #if ENABLE_SERIAL_SELF_TEST
 bool serial_self_test_active = false;
@@ -165,14 +194,26 @@ bool isChannelSignalValid(unsigned long last_update, bool signal_seen) {
 }
 
 bool isPowerSignalValid() {
-    return isChannelSignalValid(last_ch1_update, rc_ch1_seen);
+    unsigned long ch1_update = readRCUpdateTime(last_ch1_update);
+    bool ch1_seen = readRCChannelSeen(rc_ch1_seen);
+    return isChannelSignalValid(ch1_update, ch1_seen);
 }
 
 bool isAnyRCSignalValid() {
-    return isPowerSignalValid() ||
-           isChannelSignalValid(last_ch2_update, rc_ch2_seen) ||
-           isChannelSignalValid(last_ch3_update, rc_ch3_seen) ||
-           isChannelSignalValid(last_ch4_update, rc_ch4_seen);
+    unsigned long ch1_update = readRCUpdateTime(last_ch1_update);
+    unsigned long ch2_update = readRCUpdateTime(last_ch2_update);
+    unsigned long ch3_update = readRCUpdateTime(last_ch3_update);
+    unsigned long ch4_update = readRCUpdateTime(last_ch4_update);
+    
+    bool ch1_seen = readRCChannelSeen(rc_ch1_seen);
+    bool ch2_seen = readRCChannelSeen(rc_ch2_seen);
+    bool ch3_seen = readRCChannelSeen(rc_ch3_seen);
+    bool ch4_seen = readRCChannelSeen(rc_ch4_seen);
+    
+    return isChannelSignalValid(ch1_update, ch1_seen) ||
+           isChannelSignalValid(ch2_update, ch2_seen) ||
+           isChannelSignalValid(ch3_update, ch3_seen) ||
+           isChannelSignalValid(ch4_update, ch4_seen);
 }
 
 bool initPreferencesStorage() {
@@ -578,30 +619,85 @@ void readCurrentVoltage() {
  */
 void checkSafetyLimits() {
     float current_A = current_mA / 1000.0;
+    bool fault_detected = false;
     
     // Check overcurrent
     if (current_A > OVERCURRENT_THRESHOLD) {
-        Serial.print("OVERCURRENT DETECTED: ");
-        Serial.print(current_A);
-        Serial.println("A - Shutting down!");
+        if (system_enabled) {
+            Serial.print("OVERCURRENT DETECTED: ");
+            Serial.print(current_A);
+            Serial.println("A - Shutting down!");
+        }
         system_enabled = false;
+        fault_detected = true;
     }
     
     // Check undervoltage
     if (voltage_V < MIN_VOLTAGE_V && voltage_V > 0.1) {
-        Serial.print("UNDERVOLTAGE DETECTED: ");
-        Serial.print(voltage_V);
-        Serial.println("V - Shutting down!");
+        if (system_enabled) {
+            Serial.print("UNDERVOLTAGE DETECTED: ");
+            Serial.print(voltage_V);
+            Serial.println("V - Shutting down!");
+        }
         system_enabled = false;
+        fault_detected = true;
     }
     
     // Check overvoltage
     if (voltage_V > MAX_VOLTAGE_V) {
-        Serial.print("OVERVOLTAGE DETECTED: ");
-        Serial.print(voltage_V);
-        Serial.println("V - Shutting down!");
+        if (system_enabled) {
+            Serial.print("OVERVOLTAGE DETECTED: ");
+            Serial.print(voltage_V);
+            Serial.println("V - Shutting down!");
+        }
         system_enabled = false;
+        fault_detected = true;
     }
+    
+    // Track fault time for recovery attempt
+    if (fault_detected && system_fault_time == 0) {
+        system_fault_time = millis();
+        recovery_attempted = false;
+    }
+    
+    // Attempt recovery if enough time has passed since fault
+    if (!system_enabled && !recovery_attempted && system_fault_time > 0) {
+        unsigned long fault_duration = millis() - system_fault_time;
+        if (fault_duration >= RECOVERY_TIMEOUT_MS) {
+            // Check if conditions are safe again
+            if (current_A <= OVERCURRENT_THRESHOLD - 2.0 &&
+                (voltage_V >= MIN_VOLTAGE_V || voltage_V < 0.1) &&
+                voltage_V <= MAX_VOLTAGE_V) {
+                Serial.println("Safety limits stable - attempting recovery");
+                system_enabled = true;
+                system_fault_time = 0;
+                recovery_attempted = false;
+            } else {
+                recovery_attempted = true;
+                Serial.print("Recovery conditions not met (I=");
+                Serial.print(current_A, 1);
+                Serial.print("A, V=");
+                Serial.print(voltage_V, 1);
+                Serial.println("V)");
+            }
+        }
+    }
+}
+
+/**
+ * Reset system to safe state (for recovery)
+ */
+void resetSystemState() {
+    power_output = 0;
+    light1_state = false;
+    light2_state = false;
+    system_fault_time = 0;
+    recovery_attempted = false;
+    
+    ledcWrite(PWM_CHANNEL, 0);
+    digitalWrite(LIGHT1_PIN, LOW);
+    digitalWrite(LIGHT2_PIN, LOW);
+    digitalWrite(AUX_OUTPUT_PIN, LOW);
 }
 
 /**
@@ -621,8 +717,9 @@ void updatePowerControl() {
         return;
     }
     
-    // Map RC input to power percentage
-    int power_percent = mapRCToPower(rc_ch1_value);
+    // Map RC input to power percentage (read atomically)
+    unsigned long ch1_pulse = readRCValue(rc_ch1_value);
+    int power_percent = mapRCToPower(ch1_pulse);
     
     // Convert percentage to PWM value (0-255 for 8-bit resolution)
     power_output = map(power_percent, 0, 100, 0, 255);
@@ -632,7 +729,7 @@ void updatePowerControl() {
 }
 
 /**
- * Update light control based on RC channel 2
+ * Update light control based on RC channel 2 and 3
  */
 void updateLightControl() {
     if (!system_enabled) {
@@ -643,33 +740,41 @@ void updateLightControl() {
         return;
     }
     
-    if (!isChannelSignalValid(last_ch2_update, rc_ch2_seen)) {
+    // Read channel values atomically
+    unsigned long ch2_pulse = readRCValue(rc_ch2_value);
+    unsigned long ch3_pulse = readRCValue(rc_ch3_value);
+    unsigned long ch2_update = readRCUpdateTime(last_ch2_update);
+    unsigned long ch3_update = readRCUpdateTime(last_ch3_update);
+    bool ch2_seen = readRCChannelSeen(rc_ch2_seen);
+    bool ch3_seen = readRCChannelSeen(rc_ch3_seen);
+    
+    if (!isChannelSignalValid(ch2_update, ch2_seen)) {
         digitalWrite(LIGHT1_PIN, LOW);
         light1_state = false;
     }
 
-    if (isChannelSignalValid(last_ch2_update, rc_ch2_seen) &&
-        rc_ch2_value > LIGHT_ON_THRESHOLD && !light1_state) {
+    if (isChannelSignalValid(ch2_update, ch2_seen) &&
+        ch2_pulse > LIGHT_ON_THRESHOLD && !light1_state) {
         digitalWrite(LIGHT1_PIN, HIGH);
         light1_state = true;
-    } else if (isChannelSignalValid(last_ch2_update, rc_ch2_seen) &&
-               rc_ch2_value < LIGHT_OFF_THRESHOLD && light1_state) {
+    } else if (isChannelSignalValid(ch2_update, ch2_seen) &&
+               ch2_pulse < LIGHT_OFF_THRESHOLD && light1_state) {
         digitalWrite(LIGHT1_PIN, LOW);
         light1_state = false;
     }
 
-    if (!isChannelSignalValid(last_ch3_update, rc_ch3_seen)) {
+    if (!isChannelSignalValid(ch3_update, ch3_seen)) {
         digitalWrite(LIGHT2_PIN, LOW);
         light2_state = false;
     }
 
     // Light 2: ON when RC_CH3 > threshold (with hysteresis)
-    if (isChannelSignalValid(last_ch3_update, rc_ch3_seen) &&
-        rc_ch3_value > LIGHT_ON_THRESHOLD && !light2_state) {
+    if (isChannelSignalValid(ch3_update, ch3_seen) &&
+        ch3_pulse > LIGHT_ON_THRESHOLD && !light2_state) {
         digitalWrite(LIGHT2_PIN, HIGH);
         light2_state = true;
-    } else if (isChannelSignalValid(last_ch3_update, rc_ch3_seen) &&
-               rc_ch3_value < LIGHT_OFF_THRESHOLD && light2_state) {
+    } else if (isChannelSignalValid(ch3_update, ch3_seen) &&
+               ch3_pulse < LIGHT_OFF_THRESHOLD && light2_state) {
         digitalWrite(LIGHT2_PIN, LOW);
         light2_state = false;
     }
@@ -679,13 +784,22 @@ void updateLightControl() {
  * Update auxiliary output based on RC channel 4
  */
 void updateAuxOutput() {
-    if (!system_enabled || !isChannelSignalValid(last_ch4_update, rc_ch4_seen)) {
+    if (!system_enabled) {
+        digitalWrite(AUX_OUTPUT_PIN, LOW);
+        return;
+    }
+    
+    unsigned long ch4_update = readRCUpdateTime(last_ch4_update);
+    unsigned long ch4_pulse = readRCValue(rc_ch4_value);
+    bool ch4_seen = readRCChannelSeen(rc_ch4_seen);
+    
+    if (!isChannelSignalValid(ch4_update, ch4_seen)) {
         digitalWrite(AUX_OUTPUT_PIN, LOW);
         return;
     }
     
     // Auxiliary output: ON when RC_CH4 > threshold
-    digitalWrite(AUX_OUTPUT_PIN, rc_ch4_value > LIGHT_ON_THRESHOLD ? HIGH : LOW);
+    digitalWrite(AUX_OUTPUT_PIN, ch4_pulse > LIGHT_ON_THRESHOLD ? HIGH : LOW);
 }
 
 /**
@@ -699,27 +813,43 @@ void printStatus() {
     Serial.println(isAnyRCSignalValid() ? "OK" : "LOST");
     
     Serial.println("\n--- RC Channels ---");
+    
+    unsigned long ch1 = readRCValue(rc_ch1_value);
+    unsigned long ch2 = readRCValue(rc_ch2_value);
+    unsigned long ch3 = readRCValue(rc_ch3_value);
+    unsigned long ch4 = readRCValue(rc_ch4_value);
+    
+    unsigned long ch1_upd = readRCUpdateTime(last_ch1_update);
+    unsigned long ch2_upd = readRCUpdateTime(last_ch2_update);
+    unsigned long ch3_upd = readRCUpdateTime(last_ch3_update);
+    unsigned long ch4_upd = readRCUpdateTime(last_ch4_update);
+    
+    bool ch1_seen = readRCChannelSeen(rc_ch1_seen);
+    bool ch2_seen = readRCChannelSeen(rc_ch2_seen);
+    bool ch3_seen = readRCChannelSeen(rc_ch3_seen);
+    bool ch4_seen = readRCChannelSeen(rc_ch4_seen);
+    
     Serial.print("CH1 (Power): ");
-    Serial.print(rc_ch1_value);
+    Serial.print(ch1);
     Serial.print(" us (");
-    Serial.print(mapRCToPower(rc_ch1_value));
+    Serial.print(mapRCToPower(ch1));
     Serial.print("%) ");
-    Serial.println(isPowerSignalValid() ? "OK" : "LOST");
+    Serial.println(isChannelSignalValid(ch1_upd, ch1_seen) ? "OK" : "LOST");
     
     Serial.print("CH2 (Lights): ");
-    Serial.print(rc_ch2_value);
+    Serial.print(ch2);
     Serial.print(" us ");
-    Serial.println(isChannelSignalValid(last_ch2_update, rc_ch2_seen) ? "OK" : "LOST");
+    Serial.println(isChannelSignalValid(ch2_upd, ch2_seen) ? "OK" : "LOST");
     
     Serial.print("CH3 (Aux1): ");
-    Serial.print(rc_ch3_value);
+    Serial.print(ch3);
     Serial.print(" us ");
-    Serial.println(isChannelSignalValid(last_ch3_update, rc_ch3_seen) ? "OK" : "LOST");
+    Serial.println(isChannelSignalValid(ch3_upd, ch3_seen) ? "OK" : "LOST");
     
     Serial.print("CH4 (Aux2): ");
-    Serial.print(rc_ch4_value);
+    Serial.print(ch4);
     Serial.print(" us ");
-    Serial.println(isChannelSignalValid(last_ch4_update, rc_ch4_seen) ? "OK" : "LOST");
+    Serial.println(isChannelSignalValid(ch4_upd, ch4_seen) ? "OK" : "LOST");
     
     Serial.println("\n--- Outputs ---");
     Serial.print("Power Output: ");

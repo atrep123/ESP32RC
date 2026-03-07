@@ -69,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Safety Features
 - Automatic shutdown on overcurrent (configurable threshold, default 48A)
-- Automatic shutdown on overvoltage (configurable, default 60V)
+- Automatic shutdown on overvoltage (configurable, default 26V)
 - Automatic shutdown on undervoltage (configurable, default 10V)
 - Failsafe mode on RC signal loss (>100ms timeout)
 - Input validation for all RC PWM signals
