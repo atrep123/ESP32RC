@@ -92,4 +92,14 @@
 #define LOG_FAN_SPEED 32          // Log fan speed (0-255)
 #define LOG_ALL (LOG_TIMESTAMP | LOG_POWER_PERCENT | LOG_CURRENT_A | LOG_VOLTAGE_V | LOG_TEMPERATURE_C | LOG_FAN_SPEED)
 
+// Web Dashboard (v1.3 Phase 3 feature)
+#define WEB_DASHBOARD_ENABLED 1   // Enable web-based monitoring dashboard
+#define WEB_SERVER_PORT 80        // HTTP port for dashboard
+#define WEB_API_UPDATE_INTERVAL 500  // Update interval for JSON data (500ms)
+
+// WiFi Settings for Web Dashboard Access Point (AP mode)
+#define WIFI_AP_ENABLED 1         // Enable WiFi AP mode for dashboard
+#define WIFI_AP_SSID "ESP32RC-Dashboard"  // Access Point SSID
+#define WIFI_AP_PASSWORD "ESP32RC123"     // Access Point password (min 8 chars)
+
 #endif // CONFIG_H

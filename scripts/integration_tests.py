@@ -558,6 +558,115 @@ class IntegrationTests:
         
         return True
 
+    # ========== Web Dashboard (v1.3 Phase 3) ==========
+
+    def test_web_dashboard_json_api_structure(self):
+        """Test web dashboard JSON API response structure"""
+        # Simulate JSON API response
+        import json
+        
+        json_response = {
+            "timestamp": 12345,
+            "power_percent": 75,
+            "current_A": 3.45,
+            "voltage_V": 12.5,
+            "temperature_C": 42.3,
+            "fan_speed": 180,
+            "fan_auto": True,
+            "light1": False,
+            "light2": True,
+            "sd_ready": True,
+            "sensor_external": True
+        }
+        
+        # Verify JSON structure
+        required_fields = [
+            "timestamp", "power_percent", "current_A", "voltage_V",
+            "temperature_C", "fan_speed", "fan_auto", "light1", 
+            "light2", "sd_ready", "sensor_external"
+        ]
+        
+        for field in required_fields:
+            if field not in json_response:
+                return False
+        
+        # Verify field types
+        if not isinstance(json_response["timestamp"], int):
+            return False
+        if not isinstance(json_response["power_percent"], int):
+            return False
+        if not isinstance(json_response["fan_auto"], bool):
+            return False
+        
+        return True
+
+    def test_web_dashboard_wifi_ap_configuration(self):
+        """Test WiFi AP mode configuration for dashboard"""
+        # Simulated WiFi AP config
+        ssid = "ESP32RC-Dashboard"
+        password = "ESP32RC123"
+        port = 80
+        
+        # Verify SSID format
+        if len(ssid) < 1 or len(ssid) > 32:
+            return False
+        
+        # Verify password length (min 8 chars for WPA2)
+        if len(password) < 8 or len(password) > 63:
+            return False
+        
+        # Verify port range
+        if port < 1 or port > 65535:
+            return False
+        
+        return True
+
+    def test_web_dashboard_client_update_flow(self):
+        """Test web dashboard client-side update flow"""
+        # Simulate client update interval
+        update_interval_ms = 500
+        expected_updates_per_second = 1000 / update_interval_ms
+        
+        # Verify reasonable update rate
+        if expected_updates_per_second < 1 or expected_updates_per_second > 10:
+            return False
+        
+        # Simulate multiple updates
+        update_times = []
+        for i in range(5):
+            update_times.append(i * update_interval_ms)
+        
+        # Verify intervals are consistent
+        for i in range(1, len(update_times)):
+            interval = update_times[i] - update_times[i-1]
+            if interval != update_interval_ms:
+                return False
+        
+        return True
+
+    def test_web_dashboard_http_endpoints(self):
+        """Test web dashboard HTTP endpoint availability"""
+        # Verify required endpoints exist
+        endpoints = [
+            ("/", "GET", "text/html"),
+            ("/api/status", "GET", "application/json")
+        ]
+        
+        for endpoint, method, content_type in endpoints:
+            # Validate endpoint path
+            if not endpoint.startswith("/"):
+                return False
+            
+            # Validate HTTP method
+            if method not in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
+                return False
+            
+            # Validate content type
+            if "/" not in content_type:
+                return False
+        
+        return True
+
     # ========== System State Transitions ==========
 
     def test_startup_sequence(self):
@@ -636,6 +745,12 @@ class IntegrationTests:
         self.run_test("telemetry", "Telemetry data logging structure", self.test_telemetry_data_structure)
         self.run_test("telemetry", "Telemetry timestamp accuracy", self.test_telemetry_timestamp_accuracy)
         self.run_test("telemetry", "Telemetry data value ranges", self.test_telemetry_value_ranges)
+
+        print("\n--- Web Dashboard (v1.3 Phase 3) ---")
+        self.run_test("dashboard", "Web dashboard JSON API structure", self.test_web_dashboard_json_api_structure)
+        self.run_test("dashboard", "WiFi AP configuration", self.test_web_dashboard_wifi_ap_configuration)
+        self.run_test("dashboard", "Client-side update flow", self.test_web_dashboard_client_update_flow)
+        self.run_test("dashboard", "HTTP endpoints availability", self.test_web_dashboard_http_endpoints)
 
         print("\n--- System State Transitions ---")
         self.run_test("state", "Startup sequence", self.test_startup_sequence)

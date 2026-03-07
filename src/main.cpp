@@ -24,6 +24,8 @@
 #include <FS.h>
 #include <SD.h>
 #include <SPI.h>
+#include <WebServer.h>
+#include <WiFi.h>
 #include <stdlib.h>
 #include <string.h>
 #include "config.h"
@@ -99,6 +101,13 @@ bool sd_card_ready = false;           // SD card initialization status
 unsigned long last_telemetry_log_time = 0;  // Last telemetry log timestamp
 bool telemetry_header_written = false; // Track if CSV header written
 
+// Web Dashboard (v1.3 Phase 3 feature)
+#if WEB_DASHBOARD_ENABLED
+WebServer web_server(WEB_SERVER_PORT);
+bool web_server_ready = false;        // Web server initialization status
+unsigned long last_json_update_time = 0;  // Last JSON data update
+#endif
+
 void printStatus();
 void readCurrentVoltage();
 void updateFanControl();
@@ -106,6 +115,8 @@ void setFanSpeed(int speed);
 void initSDCard();
 void logTelemetry();
 bool writeTelemetryHeader();
+void initWebDashboard();
+void handleWebAPI();
 
 /**
  * Atomic helpers for reading volatile RC state shared with ISR
@@ -1221,6 +1232,186 @@ void logTelemetry() {
 }
 
 /**
+ * Initialize web dashboard and API endpoints
+ * Provides JSON API and HTML interface for real-time monitoring
+ */
+void initWebDashboard() {
+    #if WEB_DASHBOARD_ENABLED
+    
+    // Initialize WiFi in Access Point mode for dashboard access
+    #if WIFI_AP_ENABLED
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD);
+    IPAddress ap_ip = WiFi.softAPIP();
+    Serial.print("WiFi AP started: ");
+    Serial.println(WIFI_AP_SSID);
+    Serial.print("Connect to: http://");
+    Serial.print(ap_ip);
+    Serial.print(":");
+    Serial.println(WEB_SERVER_PORT);
+    #endif
+    
+    // JSON API endpoint: /api/status - Returns current system status
+    web_server.on("/api/status", HTTP_GET, []() {
+        // Build JSON response with current system state
+        char json_buffer[512];
+        int power_percent = (power_output * 100) / 255;
+        
+        snprintf(json_buffer, sizeof(json_buffer),
+            "{"
+            "\"timestamp\":%lu,"
+            "\"power_percent\":%d,"
+            "\"current_A\":%.2f,"
+            "\"voltage_V\":%.2f,"
+            "\"temperature_C\":%.2f,"
+            "\"fan_speed\":%d,"
+            "\"fan_auto\":%s,"
+            "\"light1\":%s,"
+            "\"light2\":%s,"
+            "\"sd_ready\":%s,"
+            "\"sensor_external\":%s"
+            "}",
+            millis(),
+            power_percent,
+            current_mA / 1000.0,
+            voltage_V,
+            last_temp_reading,
+            fan_speed,
+            fan_auto_mode ? "true" : "false",
+            light1_state ? "true" : "false",
+            light2_state ? "true" : "false",
+            sd_card_ready ? "true" : "false",
+            use_external_temp ? "true" : "false"
+        );
+        
+        web_server.send(200, "application/json", json_buffer);
+    });
+    
+    // HTML endpoint: / - Returns dashboard interface
+    web_server.on("/", HTTP_GET, []() {
+        const char* html = R"(<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32RC Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #1e1e1e; color: #fff; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        h1 { text-align: center; margin-bottom: 30px; color: #4CAF50; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .card { background: #2d2d2d; border-left: 4px solid #4CAF50; padding: 20px; border-radius: 5px; }
+        .card h3 { color: #4CAF50; margin-bottom: 10px; }
+        .value { font-size: 28px; font-weight: bold; margin: 10px 0; }
+        .unit { font-size: 12px; color: #888; }
+        .status-online { color: #4CAF50; }
+        .status-offline { color: #f44336; }
+        .button-group { display: flex; gap: 10px; margin-top: 10px; }
+        button { padding: 8px 16px; background: #4CAF50; color: white; border: none; cursor: pointer; border-radius: 3px; }
+        button:hover { background: #45a049; }
+        .refresh-time { text-align: center; color: #888; margin-top: 20px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ESP32RC Remote Dashboard</h1>
+        <div class="grid">
+            <div class="card">
+                <h3>⚡ Power</h3>
+                <div class="value"><span id="power">--</span><span class="unit">%</span></div>
+            </div>
+            <div class="card">
+                <h3>📊 Current</h3>
+                <div class="value"><span id="current">--</span><span class="unit">A</span></div>
+            </div>
+            <div class="card">
+                <h3>🔌 Voltage</h3>
+                <div class="value"><span id="voltage">--</span><span class="unit">V</span></div>
+            </div>
+            <div class="card">
+                <h3>🌡️ Temperature</h3>
+                <div class="value"><span id="temp">--</span><span class="unit">°C</span></div>
+            </div>
+            <div class="card">
+                <h3>💨 Fan Speed</h3>
+                <div class="value"><span id="fan">--</span><span class="unit">/255</span></div>
+            </div>
+            <div class="card">
+                <h3>💾 Storage</h3>
+                <div id="sd-status" class="status-offline">Checking...</div>
+            </div>
+        </div>
+        <div class="refresh-time">Last update: <span id="update-time">--</span></div>
+    </div>
+    
+    <script>
+        async function updateDashboard() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                document.getElementById('power').textContent = data.power_percent;
+                document.getElementById('current').textContent = data.current_A.toFixed(2);
+                document.getElementById('voltage').textContent = data.voltage_V.toFixed(2);
+                document.getElementById('temp').textContent = data.temperature_C.toFixed(1);
+                document.getElementById('fan').textContent = data.fan_speed;
+                
+                const sdStatus = document.getElementById('sd-status');
+                if (data.sd_ready) {
+                    sdStatus.textContent = '✓ Ready';
+                    sdStatus.className = 'status-online';
+                } else {
+                    sdStatus.textContent = '✗ Offline';
+                    sdStatus.className = 'status-offline';
+                }
+                
+                const now = new Date();
+                document.getElementById('update-time').textContent = now.toLocaleTimeString();
+            } catch (e) {
+                console.error('Update failed:', e);
+            }
+        }
+        
+        // Initial update
+        updateDashboard();
+        
+        // Update every 500ms
+        setInterval(updateDashboard, 500);
+    </script>
+</body>
+</html>)";
+        
+        web_server.send(200, "text/html", html);
+    });
+    
+    // Start web server
+    web_server.begin();
+    web_server_ready = true;
+    Serial.println("Web dashboard initialized ✓");
+    
+    #else
+    web_server_ready = false;
+    #endif
+}
+
+/**
+ * Handle web dashboard updates (called from main loop)
+ */
+void handleWebAPI() {
+    #if WEB_DASHBOARD_ENABLED
+    
+    if (!web_server_ready) {
+        return;
+    }
+    
+    // Handle incoming HTTP requests
+    web_server.handleClient();
+    
+    #endif
+}
+
+/**
  * Setup function - runs once at startup
  */
 void setup() {
@@ -1316,6 +1507,16 @@ void setup() {
     }
     #endif
 
+    // Initialize web dashboard (v1.3 Phase 3)
+    #if WEB_DASHBOARD_ENABLED
+    initWebDashboard();
+    if (web_server_ready) {
+        Serial.println("Web dashboard ready");
+    } else {
+        Serial.println("WARNING: Web dashboard initialization failed");
+    }
+    #endif
+
 #if ENABLE_SERIAL_SELF_TEST
     Serial.println("Serial self-test support enabled");
     Serial.println("Type 'help' in the serial monitor for commands");
@@ -1357,6 +1558,9 @@ void loop() {
     
     // Log telemetry data to SD card (v1.3 Phase 2)
     logTelemetry();
+    
+    // Handle web dashboard API (v1.3 Phase 3)
+    handleWebAPI();
     
     // Update outputs
 #if ENABLE_SERIAL_SELF_TEST
