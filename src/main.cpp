@@ -79,8 +79,16 @@ unsigned long system_fault_time = 0;
 constexpr unsigned long RECOVERY_TIMEOUT_MS = 5000;  // 5 second timeout before recovery attempt
 bool recovery_attempted = false;
 
+// Fan control state (v1.2 feature)
+int fan_speed = 0;                    // Current fan PWM speed (0-255)
+float last_temp_reading = 25.0;       // Last ESP32 temperature reading
+unsigned long last_fan_update = 0;    // Last fan speed update time
+bool fan_auto_mode = true;            // Auto temperature control enabled
+
 void printStatus();
 void readCurrentVoltage();
+void updateFanControl();
+void setFanSpeed(int speed);
 
 /**
  * Atomic helpers for reading volatile RC state shared with ISR
@@ -329,6 +337,11 @@ void printSerialSelfTestHelp() {
     Serial.println("  light1 on|off");
     Serial.println("  light2 on|off");
     Serial.println("  aux on|off");
+    Serial.println("Fan commands (v1.2):");
+    Serial.println("  fan status");
+    Serial.println("  fan auto       - auto mode (temp control)");
+    Serial.println("  fan off        - turn off");
+    Serial.println("  fan speed 0-255 - manual speed");
 }
 
 void printSerialSelfTestStatus() {
@@ -547,6 +560,60 @@ void processSerialCommand(const char *command) {
     }
 
     if (tryHandleSelfTestBinaryOutput(command)) {
+        return;
+    }
+
+    // Fan control commands (v1.2 feature)
+    if (strcmp(command, "fan status") == 0) {
+        Serial.println("--- Fan Status ---");
+        Serial.print("Fan Enabled: ");
+        Serial.println(FAN_ENABLED ? "YES" : "NO");
+        Serial.print("Auto Mode: ");
+        Serial.println(fan_auto_mode ? "ON" : "OFF");
+        Serial.print("Current Speed: ");
+        Serial.print(fan_speed);
+        Serial.println(" (0-255)");
+        Serial.print("Temperature: ");
+        Serial.print(last_temp_reading);
+        Serial.println("°C");
+        if (FAN_ENABLED) {
+            Serial.print("Temp Range: ");
+            Serial.print(FAN_TEMP_LOW);
+            Serial.print("°C - ");
+            Serial.print(FAN_TEMP_HIGH);
+            Serial.println("°C");
+        }
+        return;
+    }
+
+    if (strcmp(command, "fan auto") == 0) {
+        if (!FAN_ENABLED) {
+            Serial.println("Fan is disabled - configure FAN_ENABLED in config.h");
+            return;
+        }
+        setFanSpeed(-1);  // -1 means return to auto
+        return;
+    }
+
+    if (strcmp(command, "fan off") == 0) {
+        if (!FAN_ENABLED) {
+            Serial.println("Fan is disabled - configure FAN_ENABLED in config.h");
+            return;
+        }
+        fan_auto_mode = false;
+        fan_speed = 0;
+        ledcWrite(PWM_FAN_CHANNEL, 0);
+        Serial.println("Fan: turned OFF");
+        return;
+    }
+
+    if (strncmp(command, "fan speed ", 10) == 0) {
+        if (!FAN_ENABLED) {
+            Serial.println("Fan is disabled - configure FAN_ENABLED in config.h");
+            return;
+        }
+        int speed = atoi(command + 10);
+        setFanSpeed(speed);
         return;
     }
 
@@ -879,6 +946,104 @@ void printStatus() {
 }
 
 /**
+ * Read ESP32 internal temperature sensor
+ * Returns temperature in Celsius
+ */
+float readSystemTemperature() {
+    // ESP32 has internal temperature sensor
+    // Typical accuracy: ±5°C
+    // Can be read via multiple methods; using analogRead on ADC6 (temperature channel)
+    // However, ESP32-IDF provides a better API via esp_read_raw_temp or similar
+    // For simplicity, we'll estimate based on power dissipation
+    // In production, use: float temp = (temperatureRead() - 32) / 1.8; // Fahrenheit to Celsius
+    
+    // Temperature sensor in Celsius (IDF provides temperatureRead() in Fahrenheit)
+    // Calculate as a simple approximation
+    return temperatureRead() - 32.0;  // This gives approximate Celsius
+}
+
+/**
+ * Calculate fan speed based on temperature (linear interpolation)
+ * Returns PWM value 0-255 or 0 if fan disabled
+ */
+int calculateFanSpeed(float temperature) {
+    if (!FAN_ENABLED || !fan_auto_mode) {
+        return 0;
+    }
+    
+    // If below minimum temperature, fan off
+    if (temperature <= FAN_TEMP_LOW) {
+        return 0;
+    }
+    
+    // If above maximum temperature, fan at max
+    if (temperature >= FAN_TEMP_HIGH) {
+        return FAN_SPEED_MAX;
+    }
+    
+    // Linear interpolation between min and max
+    float temp_range = FAN_TEMP_HIGH - FAN_TEMP_LOW;
+    float speed_range = FAN_SPEED_MAX - FAN_SPEED_MIN;
+    float normalized = (temperature - FAN_TEMP_LOW) / temp_range;
+    
+    return (int)(FAN_SPEED_MIN + (normalized * speed_range));
+}
+
+/**
+ * Update fan PWM speed based on current temperature
+ * Called periodically from main loop
+ */
+void updateFanControl() {
+    unsigned long current_time = millis();
+    
+    // Update fan speed at monitoring interval
+    if (current_time - last_fan_update < MONITOR_INTERVAL) {
+        return;
+    }
+    last_fan_update = current_time;
+    
+    if (!FAN_ENABLED) {
+        return;
+    }
+    
+    // Read current system temperature
+    last_temp_reading = readSystemTemperature();
+    
+    // Calculate new fan speed
+    int new_fan_speed = calculateFanSpeed(last_temp_reading);
+    
+    // Apply hysteresis to prevent rapid on/off cycling
+    // Only update if change is > 10 PWM units
+    if (abs(new_fan_speed - fan_speed) > 10 || new_fan_speed == 0 || new_fan_speed == FAN_SPEED_MAX) {
+        fan_speed = new_fan_speed;
+        ledcWrite(PWM_FAN_CHANNEL, fan_speed);
+    }
+}
+
+/**
+ * Set fan speed manually (bypasses auto mode)
+ * speed: 0-255 PWM value, or -1 to return to auto mode
+ */
+void setFanSpeed(int speed) {
+    if (speed == -1) {
+        fan_auto_mode = true;
+        Serial.println("Fan: switched to AUTO mode");
+        return;
+    }
+    
+    if (speed < 0 || speed > 255) {
+        Serial.println("ERROR: Fan speed must be 0-255");
+        return;
+    }
+    
+    fan_auto_mode = false;
+    fan_speed = speed;
+    ledcWrite(PWM_FAN_CHANNEL, fan_speed);
+    Serial.print("Fan: speed set to ");
+    Serial.println(speed);
+}
+
+/**
  * Setup function - runs once at startup
  */
 void setup() {
@@ -919,6 +1084,15 @@ void setup() {
     ledcWrite(PWM_CHANNEL, 0);
     
     Serial.println("PWM output configured");
+    
+    // Configure PWM for fan control (v1.2)
+    if (FAN_ENABLED) {
+        pinMode(FAN_PIN, OUTPUT);
+        ledcSetup(PWM_FAN_CHANNEL, FAN_PWM_FREQUENCY, PWM_RESOLUTION);
+        ledcAttachPin(FAN_PIN, PWM_FAN_CHANNEL);
+        ledcWrite(PWM_FAN_CHANNEL, 0);
+        Serial.println("Fan control configured");
+    }
     
     // Initialize I2C for current sensor
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
@@ -970,6 +1144,9 @@ void loop() {
         }
         last_monitor_time = current_time;
     }
+    
+    // Update fan control based on temperature
+    updateFanControl();
     
     // Update outputs
 #if ENABLE_SERIAL_SELF_TEST

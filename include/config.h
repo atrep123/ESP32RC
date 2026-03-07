@@ -55,4 +55,16 @@
 #define LIGHT_ON_THRESHOLD 1600   // PWM value above which light turns on
 #define LIGHT_OFF_THRESHOLD 1400  // PWM value below which light turns off
 
+// Fan control settings (v1.2 feature)
+#define FAN_PIN 12                // GPIO 12 for fan PWM control
+#define PWM_FAN_CHANNEL 1         // ESP32 PWM channel 1 (power uses channel 0)
+#define FAN_PWM_FREQUENCY 1000    // 1kHz PWM frequency for fan
+#define FAN_ENABLED 1             // Enable fan control by default
+
+// Fan temperature control thresholds
+#define FAN_TEMP_LOW 35.0         // Start fan at 35°C
+#define FAN_TEMP_HIGH 50.0        // Max fan speed at 50°C
+#define FAN_SPEED_MIN 30          // Minimum PWM (30/255 = 12% minimum speed)
+#define FAN_SPEED_MAX 255         // Maximum PWM (100% speed)
+
 #endif // CONFIG_H

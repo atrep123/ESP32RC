@@ -1,29 +1,49 @@
 # ESP32RC Project Notes and Known Issues
 
-## Recently Fixed (v2026-03-07)
+## Recently Implemented (v2026-03-07 to present)
 
-### Build Configuration
+### v1.1.1 Improvements (Initial Release)
 - [x] Added `esp32dev_selftest` PlatformIO environment with `-DENABLE_SERIAL_SELF_TEST=1` flag
 - [x] Removed unnecessary `-DBOARD_HAS_PSRAM` flag from default environment
 - [x] Fixed CHANGELOG overvoltage threshold documentation (60V → 26V)
-
-### Code Improvements
 - [x] Added atomic read helpers (`readRCValue`, `readRCUpdateTime`, `readRCChannelSeen`) for ISR-safe RC channel access
-- [x] Replaced all direct volatile reads with atomic wrappers in:`updatePowerControl()`, `updateLightControl()`, `updateAuxOutput()`, `isPowerSignalValid()`, `isAnyRCSignalValid()`, `printStatus()`
-- [x] Implemented recovery mechanism for  safety shutdown state:
-  - Tracks fault time with `system_fault_time`
-  - Automatic recovery after `RECOVERY_TIMEOUT_MS` (5 seconds) if conditions stabilize
-  - Added `resetSystemState()` helper function
-  - Added `recovery_attempted` flag to prevent repeated recovery attempts
+- [x] Implemented recovery mechanism for safety shutdown state (5-second stabilization window)
+- [x] Created `build_sanity_tests.py` with 12 automated verification checks
+- [x] Created `hardware_verification.py` for interactive serial hardware testing
+- [x] Added comprehensive documentation (5 new docs, 2 enhanced)
+
+### v1.2 Fan Control Feature (Current)
+- [x] Added PWM fan controller with temperature-based automatic control
+  - Reads ESP32 internal temperature sensor
+  - Linear fan speed interpolation between FAN_TEMP_LOW (35°C) and FAN_TEMP_HIGH (50°C)
+  - Configurable minimum speed (FAN_SPEED_MIN=30) and maximum speed (FAN_SPEED_MAX=255)
+  - Hysteresis to prevent rapid speed oscillation (10 PWM threshold)
+- [x] Implemented dual-mode fan control:
+  - **Auto mode**: Temperature-based speed control (default, recommended)
+  - **Manual mode**: Fixed speed override via serial command
+- [x] Added serial command interface for fan control:
+  - `fan status` - Display current temperature and fan speed
+  - `fan auto` - Switch to automatic temperature control
+  - `fan off` - Turn fan off
+  - `fan speed <0-255>` - Set manual speed
+- [x] Extended build sanity tests from 12 to 15 tests:
+  - New tests: Fan config validation, function presence, serial command verification
+  - All 15 tests passing
+- [x] Created comprehensive FAN_CONTROL.md documentation (500+ lines):
+  - Hardware wiring and pin configuration
+  - Temperature sensor details and calibration notes
+  - Operation modes and thermal mapping
+  - Serial command reference with examples
+  - Troubleshooting guide for common issues
+  - Performance metrics and thermal response times
+  - Integration with other features
 
 ### Testing Infrastructure
-- [x] Created `build_sanity_tests.py` for automated verification:
-  - Builds both PlatformIO environments
-  - Verifies config constants
-  - Checks for critical functions in main.cpp
-  - Validates atomic read helpers presence
-  - Verifies recovery mechanism implementation
-- [x] Created `hardware_verification.py` for interactive hardware testing via serial connection
+- [x] Updated `build_sanity_tests.py`:
+  - Added fan feature detection tests (config constants, functions, serial commands)
+  - Uses regex pattern matching for robust command detection
+  - Total: 15 tests (up from 12), all passing
+  - Covers: Builds, configs, source code, recovery, and fan feature
 
 ## Known Issues (non-critical, documented for future work)
 

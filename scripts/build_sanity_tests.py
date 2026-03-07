@@ -143,6 +143,65 @@ class BuildSanityTest:
                 return False
         return True
 
+    def test_fan_config_present(self):
+        """Test that fan control configuration is defined"""
+        config_path = self.project_dir / "include" / "config.h"
+        content = config_path.read_text()
+        
+        fan_defines = [
+            "FAN_PIN",
+            "PWM_FAN_CHANNEL",
+            "FAN_PWM_FREQUENCY",
+            "FAN_ENABLED",
+            "FAN_TEMP_LOW",
+            "FAN_TEMP_HIGH",
+            "FAN_SPEED_MIN",
+            "FAN_SPEED_MAX",
+        ]
+        
+        for define in fan_defines:
+            if f"#define {define}" not in content:
+                print(f"  Missing fan define: {define}")
+                return False
+        return True
+
+    def test_fan_functions_present(self):
+        """Test that fan control functions are implemented"""
+        main_path = self.project_dir / "src" / "main.cpp"
+        content = main_path.read_text()
+        
+        fan_functions = [
+            "readSystemTemperature",
+            "calculateFanSpeed",
+            "updateFanControl",
+            "setFanSpeed",
+        ]
+        
+        for func in fan_functions:
+            if func not in content:
+                print(f"  Missing fan function: {func}")
+                return False
+        return True
+
+    def test_fan_serial_commands(self):
+        """Test that fan serial commands are implemented"""
+        main_path = self.project_dir / "src" / "main.cpp"
+        content = main_path.read_text()
+        
+        # Check for command handlers using both strcmp and strncmp patterns
+        fan_command_patterns = [
+            r'strcmp\(command,\s+"fan status"',
+            r'strcmp\(command,\s+"fan auto"',
+            r'strcmp\(command,\s+"fan off"',
+            r'strncmp\(command,\s+"fan speed',
+        ]
+        
+        for pattern in fan_command_patterns:
+            if not re.search(pattern, content):
+                print(f"  Missing fan command pattern: {pattern}")
+                return False
+        return True
+
     def test_platformio_ini_selftest_env(self):
         """Test that platformio.ini contains esp32dev_selftest"""
         ini_path = self.project_dir / "platformio.ini"
@@ -219,6 +278,11 @@ class BuildSanityTest:
         self.run_test("Main.cpp functions present", self.test_main_cpp_functions)
         self.run_test("Atomic read helpers present", self.test_atomic_reads_present)
         self.run_test("Recovery mechanism present", self.test_recovery_mechanism_present)
+        
+        print("\n--- Fan Control Tests (v1.2) ---")
+        self.run_test("Fan config constants defined", self.test_fan_config_present)
+        self.run_test("Fan control functions present", self.test_fan_functions_present)
+        self.run_test("Fan serial commands implemented", self.test_fan_serial_commands)
         
         print("\n" + "=" * 60)
         print(f"Results: {self.passed} passed, {self.failed} failed, {self.warnings} warnings")
