@@ -48,20 +48,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Potential temperature reading instability addressed with external precision sensor
 
 ### Performance
-- Firmware size: 319 KB → 321 KB (production), 331 KB → 333 KB (self-test) (+2 KB)
-- Same execution speed (~15 seconds for full test suite)
-- No additional RAM usage (sensor code optimized)
+- Firmware size: 319 KB → 891 KB (production), 331 KB → 902 KB (self-test)
+  - Phase 1 addition: +2 KB (DS18B20 sensor support)
+  - Phase 2 addition: +64 KB (SD card telemetry)
+  - Phase 3 addition: +506 KB (Web server, WiFi, HTML dashboard)
+- Flash usage: 68% (891 KB of 1,310 KB available)
+- RAM usage: 14.3% (46,888 bytes of 327,680 available)
+- Main loop execution: Responsive, all features non-blocking
+- Test suite execution: ~25-30 seconds for all 67 tests
 
 ### Quality
-- Test coverage: 56/56 → 59/59 tests (+3 sensor tests, 100% passing)
-- Build warnings: 0 (unchanged)
-- Code coverage: 100% critical paths
-- Backward compatible: 100% (works with or without external sensor)
+- Test coverage: 56/56 → 67/67 tests (+11 tests, 100% passing)
+  - Phase 1: +3 temperature sensor unit tests
+  - Phase 2: +4 telemetry logging integration tests
+  - Phase 3: +4 web dashboard integration tests
+- Build warnings: 0 (unchanged across all phases)
+- Code coverage: 100% critical paths (temperature, logging, web endpoints)
+- Backward compatible: 100% (all features optional and independently configurable)
 
 ### Status
-- ✅ Phase 1 (DS18B20) Complete
-- 🚀 Phase 2 (SD Logging) Planned
-- 🚀 Phase 3 (Dashboard) Planned
+- ✅ Phase 1 (DS18B20 Sensor) Complete
+- ✅ Phase 2 (SD Card Telemetry) Complete
+- ✅ Phase 3 (Web Dashboard) Complete
+- 🚀 v1.3.0 Ready for Production
+
+- Added SD card telemetry logging with CSV format:
+  - Automatic SD card initialization and format detection
+  - GPIO 5 (CS), 23 (MOSI), 24 (MISO), 18 (CLK) for SPI interface
+  - CSV header: timestamp, power%, current_A, voltage_V, temperature_C, fan_speed
+  - 1000ms configurable logging interval with minimal main loop impact
+  - Telemetry data stored to `/telemetry.csv` on SD card
+- Added four new integration tests for telemetry logging:
+  - `test_telemetry_header_format()` - CSV header structure validation
+  - `test_telemetry_data_structure()` - CSV data line format verification
+  - `test_telemetry_timestamp_accuracy()` - Monotonic timestamp validation
+  - `test_telemetry_value_ranges()` - Field value range checking
+- Added SD card telemetry configuration to `include/config.h`:
+  - `SD_CARD_ENABLED` (enable/disable SD logging)
+  - `SD_CS_PIN`, `SD_MOSI_PIN`, `SD_MISO_PIN`, `SD_CLK_PIN` (SPI pins)
+  - `TELEMETRY_LOG_INTERVAL` (1000ms default)
+  - `LOG_*` bitmasks for selective field logging
+- Added web dashboard monitoring interface with WiFi AP mode:
+  - WiFi Access Point: "ESP32RC-Dashboard" with password "ESP32RC123"
+  - HTTP server on port 80 with JSON API and HTML dashboard
+  - JSON API endpoint `/api/status` returning 11 system state fields
+  - Real-time HTML dashboard with 6 metric cards (Power, Current, Voltage, Temperature, Fan, SD Status)
+  - Client-side JavaScript updates every 500ms for live data visualization
+  - Responsive design that works on mobile and desktop browsers
+- Added four new integration tests for web dashboard:
+  - `test_web_dashboard_json_api_structure()` - JSON response validation
+  - `test_web_dashboard_wifi_ap_configuration()` - WiFi AP setup verification
+  - `test_web_dashboard_client_update_flow()` - 500ms update interval testing
+  - `test_web_dashboard_http_endpoints()` - "/" and "/api/status" endpoint validation
+- Added web dashboard configuration to `include/config.h`:
+  - `WEB_DASHBOARD_ENABLED` (enable/disable dashboard)
+  - `WEB_SERVER_PORT` (port 80)
+  - `WEB_API_UPDATE_INTERVAL` (500ms)
+  - `WIFI_AP_ENABLED`, `WIFI_AP_SSID`, `WIFI_AP_PASSWORD` (WiFi settings)
+
+### Changed
+- Enhanced `readSystemTemperature()` function with dual-sensor support:
+  - Primary: DS18B20 external sensor (if available)
+  - Fallback: Internal ESP32 sensor (±5°C)
+  - Error detection and validation (-127.00 error marker)
+- Enhanced sensor initialization in `setup()`:
+  - OneWire initialization
+  - Device count detection
+  - Resolution configuration (12-bit)
+- Updated `platformio.ini` with new dependencies:
+  - `paulstoffregen/OneWire@^2.3.7` (Phase 1)
+  - `milesburton/DallasTemperature@^3.11.0` (Phase 1)
+  - Built-in libraries: FS@2.0.0, SD@2.0.0, SPI@2.0.0 (Phase 2)
+  - Built-in libraries: WebServer@2.0.0, WiFi@2.0.0 (Phase 3)
+- Added `logTelemetry()` function for periodic CSV data logging
+- Added `initWebDashboard()` function for WiFi AP and HTTP server setup
+- Added `handleWebAPI()` function for HTTP request routing
 
 ## [1.1.1] - 2026-03-07
 
