@@ -18,6 +18,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_INA219.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #include <Preferences.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +28,10 @@
 // Global objects
 Adafruit_INA219 ina219;
 Preferences preferences;
+OneWire oneWire(TEMP_SENSOR_PIN);
+DallasTemperature tempSensor(&oneWire);
 bool current_sensor_available = false;
+bool temp_sensor_available = false;
 bool preferences_ready = false;
 bool current_scale_has_saved_value = false;
 float persisted_current_scale = CURRENT_SCALE;
@@ -81,9 +86,10 @@ bool recovery_attempted = false;
 
 // Fan control state (v1.2 feature)
 int fan_speed = 0;                    // Current fan PWM speed (0-255)
-float last_temp_reading = 25.0;       // Last ESP32 temperature reading
+float last_temp_reading = 25.0;       // Last temperature reading
 unsigned long last_fan_update = 0;    // Last fan speed update time
 bool fan_auto_mode = true;            // Auto temperature control enabled
+bool use_external_temp = false;       // Using external sensor when available
 
 void printStatus();
 void readCurrentVoltage();
@@ -946,20 +952,36 @@ void printStatus() {
 }
 
 /**
- * Read ESP32 internal temperature sensor
+ * Read temperature from external DS18B20 sensor or fallback to internal ESP32 sensor
  * Returns temperature in Celsius
+ * External sensor accuracy: ±0.5°C (v1.3 feature)
+ * Internal sensor accuracy: ±5°C
  */
 float readSystemTemperature() {
-    // ESP32 has internal temperature sensor
-    // Typical accuracy: ±5°C
-    // Can be read via multiple methods; using analogRead on ADC6 (temperature channel)
-    // However, ESP32-IDF provides a better API via esp_read_raw_temp or similar
-    // For simplicity, we'll estimate based on power dissipation
-    // In production, use: float temp = (temperatureRead() - 32) / 1.8; // Fahrenheit to Celsius
+    // Try external DS18B20 sensor first (v1.3)
+    if (TEMP_SENSOR_ENABLED && use_external_temp && temp_sensor_available) {
+        tempSensor.requestTemperatures();
+        
+        // Wait for conversion (depends on resolution)
+        // 12-bit = 750ms, 11-bit = 375ms, 10-bit = 187.5ms, 9-bit = 93.75ms
+        delay(800);  // Conservative wait time
+        
+        float temp = tempSensor.getTempCByIndex(0);
+        
+        // Validate reading (DS18B20 returns -127.00 if reading failed)
+        if (temp != -127.00 && temp > -50.0 && temp < 125.0) {
+            return temp;
+        }
+        
+        // If reading failed, fall through to internal sensor
+        Serial.println("WARNING: External temperature sensor read failed, using internal sensor");
+        use_external_temp = false;
+    }
     
-    // Temperature sensor in Celsius (IDF provides temperatureRead() in Fahrenheit)
-    // Calculate as a simple approximation
-    return temperatureRead() - 32.0;  // This gives approximate Celsius
+    // Fallback to internal ESP32 temperature sensor
+    // ESP32 has internal temperature sensor accessible via temperatureRead()
+    // temperatureRead() returns Fahrenheit, we need Celsius
+    return temperatureRead() - 32.0;
 }
 
 /**
@@ -1092,6 +1114,26 @@ void setup() {
         ledcAttachPin(FAN_PIN, PWM_FAN_CHANNEL);
         ledcWrite(PWM_FAN_CHANNEL, 0);
         Serial.println("Fan control configured");
+    }
+    
+    // Initialize external temperature sensor (v1.3 feature)
+    if (TEMP_SENSOR_ENABLED) {
+        pinMode(TEMP_SENSOR_PIN, INPUT_PULLUP);
+        tempSensor.begin();
+        tempSensor.setResolution(TEMP_SENSOR_PRECISION);
+        
+        // Check if sensor is present
+        if (tempSensor.getDeviceCount() > 0) {
+            temp_sensor_available = true;
+            use_external_temp = TEMP_SENSOR_USE_EXTERNAL;
+            Serial.print("External temperature sensor found (");
+            Serial.print(tempSensor.getDeviceCount());
+            Serial.println(" device(s))");
+        } else {
+            Serial.println("WARNING: Temperature sensor not found - using internal ESP32 sensor");
+            temp_sensor_available = false;
+            use_external_temp = false;
+        }
     }
     
     // Initialize I2C for current sensor

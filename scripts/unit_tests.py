@@ -251,6 +251,91 @@ class UnitTests:
         
         return True
 
+    # ========== Temperature Sensor Tests (v1.3) ==========
+
+    def test_ds18b20_temperature_range_validation(self):
+        """Test DS18B20 sensor reading validation (12-bit precision)"""
+        # DS18B20 valid range: -55°C to +125°C
+        # Invalid marker value: -127.00 (sensor error)
+        
+        def validate_temp_reading(temp):
+            # -127.00 is error marker (failed read)
+            if temp == -127.00:
+                return False
+            # Valid range check
+            if temp < -55.0 or temp > 125.0:
+                return False
+            return True
+        
+        # Valid readings
+        if not validate_temp_reading(25.0):
+            return False
+        if not validate_temp_reading(-10.0):
+            return False
+        if not validate_temp_reading(100.0):
+            return False
+        
+        # Invalid: error marker
+        if validate_temp_reading(-127.00):
+            return False
+        
+        # Invalid: out of range
+        if validate_temp_reading(-60.0):
+            return False
+        if validate_temp_reading(150.0):
+            return False
+        
+        return True
+
+    def test_ds18b20_precision_levels(self):
+        """Test DS18B20 precision settings and conversion times"""
+        # 9-bit:  0.5°C resolution,   93.75ms conversion
+        # 10-bit: 0.25°C resolution, 187.5ms conversion
+        # 11-bit: 0.125°C resolution, 375ms conversion
+        # 12-bit: 0.0625°C resolution, 750ms conversion
+        
+        precision_map = {
+            9: (0.5, 94),
+            10: (0.25, 188),
+            11: (0.125, 375),
+            12: (0.0625, 750)
+        }
+        
+        # Test 12-bit (highest precision)
+        res, convert_time = precision_map.get(12, (None, None))
+        if not self.assert_close(res, 0.0625, tolerance=0.001):
+            return False
+        if not (convert_time >= 700 and convert_time <= 800):
+            return False
+        
+        return True
+
+    def test_external_temp_sensor_fallback(self):
+        """Test fallback from external to internal sensor"""
+        use_external = True
+        sensor_available = True
+        external_read_failed = False
+        
+        # Scenario 1: External available, no failures → use external
+        if not sensor_available:
+            use_external = False
+        if external_read_failed:
+            use_external = False
+        
+        if not use_external:  # Should still be True (using external)
+            return False
+        
+        # Scenario 2: External NOT available → fall back to internal  
+        sensor_available = False
+        use_external = True
+        if not sensor_available:
+            use_external = False
+        
+        if use_external:  # Should now be False (using internal)
+            return False
+        
+        return True
+
     # ========== Current Measurement Tests ==========
 
     def test_current_scaling(self):
@@ -438,6 +523,11 @@ class UnitTests:
         print("\n--- Fan Control Tests ---")
         self.run_test("fan", "Fan temperature mapping", self.test_fan_temperature_mapping)
         self.run_test("fan", "Fan hysteresis", self.test_fan_hysteresis)
+
+        print("\n--- Temperature Sensor Tests (v1.3) ---")
+        self.run_test("sensor", "DS18B20 temperature range validation", self.test_ds18b20_temperature_range_validation)
+        self.run_test("sensor", "DS18B20 precision levels", self.test_ds18b20_precision_levels)
+        self.run_test("sensor", "External temp sensor fallback", self.test_external_temp_sensor_fallback)
 
         print("\n--- Current Measurement Tests ---")
         self.run_test("current", "Current scaling", self.test_current_scaling)

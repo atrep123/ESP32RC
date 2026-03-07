@@ -67,4 +67,11 @@
 #define FAN_SPEED_MIN 30          // Minimum PWM (30/255 = 12% minimum speed)
 #define FAN_SPEED_MAX 255         // Maximum PWM (100% speed)
 
+// External Temperature Sensor (DS18B20) - v1.3 feature
+#define TEMP_SENSOR_PIN 19        // GPIO 19 for OneWire (DS18B20)
+#define TEMP_SENSOR_ENABLED 1     // Enable external temperature sensor
+#define TEMP_SENSOR_PRECISION 12  // 12-bit precision (0.0625°C resolution)
+#define TEMP_SENSOR_REQUEST_TIMEOUT 1000  // 1 second timeout for sensor read
+#define TEMP_SENSOR_USE_EXTERNAL 1        // Use external sensor when available (fallback to internal)
+
 #endif // CONFIG_H
