@@ -74,4 +74,22 @@
 #define TEMP_SENSOR_REQUEST_TIMEOUT 1000  // 1 second timeout for sensor read
 #define TEMP_SENSOR_USE_EXTERNAL 1        // Use external sensor when available (fallback to internal)
 
+// SD Card Telemetry Logging (v1.3 Phase 2 feature)
+#define SD_CARD_ENABLED 1         // Enable SD card telemetry logging
+#define SD_CS_PIN 5               // SD card chip select (GPIO 5)
+#define SD_MOSI_PIN 23            // SD card MOSI (GPIO 23)
+#define SD_MISO_PIN 24            // SD card MISO (GPIO 24)
+#define SD_CLK_PIN 18             // SD card CLK (GPIO 18)
+#define TELEMETRY_LOG_INTERVAL 1000  // Log telemetry every 1000ms (1 second)
+#define TELEMETRY_FILENAME "/telemetry.csv"  // Default telemetry log file
+
+// Telemetry data fields to log (bitmask)
+#define LOG_TIMESTAMP 1           // Log timestamp (ms)
+#define LOG_POWER_PERCENT 2       // Log power percentage (0-100)
+#define LOG_CURRENT_A 4           // Log current (Amperes)
+#define LOG_VOLTAGE_V 8           // Log voltage (Volts)
+#define LOG_TEMPERATURE_C 16      // Log temperature (Celsius)
+#define LOG_FAN_SPEED 32          // Log fan speed (0-255)
+#define LOG_ALL (LOG_TIMESTAMP | LOG_POWER_PERCENT | LOG_CURRENT_A | LOG_VOLTAGE_V | LOG_TEMPERATURE_C | LOG_FAN_SPEED)
+
 #endif // CONFIG_H

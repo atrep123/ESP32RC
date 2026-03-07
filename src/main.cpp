@@ -21,6 +21,9 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Preferences.h>
+#include <FS.h>
+#include <SD.h>
+#include <SPI.h>
 #include <stdlib.h>
 #include <string.h>
 #include "config.h"
@@ -91,10 +94,18 @@ unsigned long last_fan_update = 0;    // Last fan speed update time
 bool fan_auto_mode = true;            // Auto temperature control enabled
 bool use_external_temp = false;       // Using external sensor when available
 
+// SD Card Telemetry Logging (v1.3 Phase 2 feature)
+bool sd_card_ready = false;           // SD card initialization status
+unsigned long last_telemetry_log_time = 0;  // Last telemetry log timestamp
+bool telemetry_header_written = false; // Track if CSV header written
+
 void printStatus();
 void readCurrentVoltage();
 void updateFanControl();
 void setFanSpeed(int speed);
+void initSDCard();
+void logTelemetry();
+bool writeTelemetryHeader();
 
 /**
  * Atomic helpers for reading volatile RC state shared with ISR
@@ -1066,6 +1077,150 @@ void setFanSpeed(int speed) {
 }
 
 /**
+ * Initialize SD card for telemetry logging
+ * Sets up SPI pins and initializes SD filesystem
+ */
+void initSDCard() {
+    #if SD_CARD_ENABLED
+    
+    // Initialize SD card with SPI
+    SPI.begin(SD_CLK_PIN, SD_MISO_PIN, SD_MOSI_PIN);
+    
+    if (!SD.begin(SD_CS_PIN)) {
+        Serial.println("ERROR: SD card initialization failed");
+        sd_card_ready = false;
+        return;
+    }
+    
+    sd_card_ready = true;
+    uint8_t cardType = SD.cardType();
+    
+    if (cardType == CARD_NONE) {
+        Serial.println("ERROR: No SD card found");
+        sd_card_ready = false;
+        return;
+    }
+    
+    Serial.print("SD Card Type: ");
+    if (cardType == CARD_MMC) {
+        Serial.println("MMC");
+    } else if (cardType == CARD_SD) {
+        Serial.println("SD");
+    } else if (cardType == CARD_SDHC) {
+        Serial.println("SDHC");
+    } else {
+        Serial.println("UNKNOWN");
+    }
+    
+    // Get card size
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.print("SD Card Size: ");
+    Serial.print(cardSize);
+    Serial.println(" MB");
+    
+    // Write telemetry header if needed
+    writeTelemetryHeader();
+    
+    #else
+    sd_card_ready = false;
+    #endif
+}
+
+/**
+ * Write CSV header to telemetry log file
+ * Returns true if successful
+ */
+bool writeTelemetryHeader() {
+    #if SD_CARD_ENABLED
+    
+    if (!sd_card_ready) {
+        return false;
+    }
+    
+    // Check if file exists
+    if (!SD.exists(TELEMETRY_FILENAME)) {
+        // Create new file and write header
+        File file = SD.open(TELEMETRY_FILENAME, FILE_WRITE);
+        if (!file) {
+            Serial.print("ERROR: Cannot create ");
+            Serial.println(TELEMETRY_FILENAME);
+            return false;
+        }
+        
+        // Write CSV header
+        file.println("Time_ms,Power_%,Current_A,Voltage_V,Temp_C,Fan_0-255");
+        file.close();
+        telemetry_header_written = true;
+        Serial.print("Created telemetry log: ");
+        Serial.println(TELEMETRY_FILENAME);
+        return true;
+    }
+    
+    telemetry_header_written = true;
+    return true;
+    
+    #else
+    return false;
+    #endif
+}
+
+/**
+ * Log telemetry data to SD card
+ * CSV format: timestamp, power%, current_A, voltage_V, temperature_C, fan_speed
+ * Called periodically from main loop
+ */
+void logTelemetry() {
+    #if SD_CARD_ENABLED
+    
+    if (!sd_card_ready || !telemetry_header_written) {
+        return;
+    }
+    
+    unsigned long current_time = millis();
+    
+    // Log at configured interval
+    if (current_time - last_telemetry_log_time < TELEMETRY_LOG_INTERVAL) {
+        return;
+    }
+    last_telemetry_log_time = current_time;
+    
+    // Open file in append mode
+    File file = SD.open(TELEMETRY_FILENAME, FILE_APPEND);
+    if (!file) {
+        Serial.println("ERROR: Cannot open telemetry log for writing");
+        return;
+    }
+    
+    // Build CSV line with all logged fields
+    char buffer[256];
+    int written = 0;
+    
+    // Timestamp
+    written += sprintf(buffer + written, "%lu,", current_time);
+    
+    // Power percentage (0-100)
+    int power_percent = (power_output * 100) / 255;
+    written += sprintf(buffer + written, "%d,", power_percent);
+    
+    // Current (A)
+    written += sprintf(buffer + written, "%.2f,", current_mA / 1000.0);
+    
+    // Voltage (V)
+    written += sprintf(buffer + written, "%.2f,", voltage_V);
+    
+    // Temperature (C)
+    written += sprintf(buffer + written, "%.2f,", last_temp_reading);
+    
+    // Fan speed (0-255)
+    written += sprintf(buffer + written, "%d", fan_speed);
+    
+    file.println(buffer);
+    file.close();
+    
+    #endif
+}
+
+/**
  * Setup function - runs once at startup
  */
 void setup() {
@@ -1151,6 +1306,16 @@ void setup() {
         Serial.println("WARNING: Current sensor not found - continuing without monitoring");
     }
 
+    // Initialize SD card for telemetry logging (v1.3 Phase 2)
+    #if SD_CARD_ENABLED
+    initSDCard();
+    if (sd_card_ready) {
+        Serial.println("SD card telemetry logging enabled");
+    } else {
+        Serial.println("WARNING: SD card not available - telemetry logging disabled");
+    }
+    #endif
+
 #if ENABLE_SERIAL_SELF_TEST
     Serial.println("Serial self-test support enabled");
     Serial.println("Type 'help' in the serial monitor for commands");
@@ -1189,6 +1354,9 @@ void loop() {
     
     // Update fan control based on temperature
     updateFanControl();
+    
+    // Log telemetry data to SD card (v1.3 Phase 2)
+    logTelemetry();
     
     // Update outputs
 #if ENABLE_SERIAL_SELF_TEST

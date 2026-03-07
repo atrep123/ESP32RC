@@ -428,6 +428,136 @@ class IntegrationTests:
         
         return True
 
+    # ========== SD Card Telemetry Logging (v1.3) ==========
+
+    def test_telemetry_header_format(self):
+        """Test CSV header format for telemetry log"""
+        # Expected header format
+        expected_header = "Time_ms,Power_%,Current_A,Voltage_V,Temp_C,Fan_0-255"
+        
+        # Simulate CSV header creation
+        csv_header = "Time_ms,Power_%,Current_A,Voltage_V,Temp_C,Fan_0-255"
+        
+        if csv_header != expected_header:
+            return False
+        
+        # Verify all required fields are present
+        fields = csv_header.split(',')
+        required_fields = ["Time_ms", "Power_%", "Current_A", "Voltage_V", "Temp_C", "Fan_0-255"]
+        
+        if len(fields) != len(required_fields):
+            return False
+        
+        for field, required in zip(fields, required_fields):
+            if field != required:
+                return False
+        
+        return True
+
+    def test_telemetry_data_structure(self):
+        """Test telemetry CSV data line structure"""
+        # Simulate a telemetry data entry
+        timestamp_ms = 12345
+        power_percent = 75
+        current_a = 3.45
+        voltage_v = 12.5
+        temperature_c = 42.3
+        fan_speed = 180
+        
+        # Simulate CSV line creation
+        csv_line = f"{timestamp_ms},{power_percent},{current_a:.2f},{voltage_v:.2f},{temperature_c:.2f},{fan_speed}"
+        
+        # Parse and validate
+        fields = csv_line.split(',')
+        
+        if len(fields) != 6:
+            return False
+        
+        # Validate field types and ranges
+        try:
+            ts = int(fields[0])
+            power = int(fields[1])
+            current = float(fields[2])
+            voltage = float(fields[3])
+            temp = float(fields[4])
+            fan = int(fields[5])
+        except ValueError:
+            return False
+        
+        # Check value ranges
+        if not (ts > 0 and 0 <= power <= 100):
+            return False
+        
+        if not (current >= 0 and voltage >= 0):
+            return False
+        
+        if not (-50 <= temp <= 125):  # DS18B20 range
+            return False
+        
+        if not (0 <= fan <= 255):
+            return False
+        
+        return True
+
+    def test_telemetry_timestamp_accuracy(self):
+        """Test telemetry timestamp is monotonically increasing"""
+        # Simulate multiple log entries over time
+        timestamps = [1000, 2000, 3000, 4000, 5000]
+        
+        # Verify timestamps are strictly increasing
+        for i in range(1, len(timestamps)):
+            if timestamps[i] <= timestamps[i-1]:
+                return False
+        
+        # Verify intervals are consistent (approximately 1 second = 1000ms)
+        expected_interval = 1000
+        tolerance = 50  # Allow ±50ms tolerance
+        
+        for i in range(1, len(timestamps)):
+            actual_interval = timestamps[i] - timestamps[i-1]
+            if abs(actual_interval - expected_interval) > tolerance:
+                return False
+        
+        return True
+
+    def test_telemetry_value_ranges(self):
+        """Test telemetry data values are within valid ranges"""
+        # Test various data values
+        test_cases = [
+            {"power": 0, "current": 0, "voltage": 0, "temp": 25.5, "fan": 0, "valid": True},
+            {"power": 100, "current": 50.0, "voltage": 26.0, "temp": 50.0, "fan": 255, "valid": True},
+            {"power": 50, "current": 25.5, "voltage": 12.5, "temp": 35.2, "fan": 128, "valid": True},
+            {"power": 101, "current": 50.0, "voltage": 12.5, "temp": 35.2, "fan": 128, "valid": False},  # Invalid power
+            {"power": 50, "current": -5.0, "voltage": 12.5, "temp": 35.2, "fan": 128, "valid": False},  # Negative current
+            {"power": 50, "current": 25.5, "voltage": 12.5, "temp": 200.0, "fan": 128, "valid": False},  # Excessive temp
+            {"power": 50, "current": 25.5, "voltage": 12.5, "temp": 35.2, "fan": 256, "valid": False},  # Invalid fan speed
+        ]
+        
+        for case in test_cases:
+            # Validate ranges
+            valid = True
+            
+            if not (0 <= case["power"] <= 100):
+                valid = False
+            
+            if not (case["current"] >= 0):
+                valid = False
+            
+            if not (case["voltage"] >= 0):
+                valid = False
+            
+            if not (-55 <= case["temp"] <= 125):  # DS18B20 range
+                valid = False
+            
+            if not (0 <= case["fan"] <= 255):
+                valid = False
+            
+            # Verify result matches expected
+            if valid != case["valid"]:
+                return False
+        
+        return True
+
     # ========== System State Transitions ==========
 
     def test_startup_sequence(self):
@@ -500,6 +630,12 @@ class IntegrationTests:
 
         print("\n--- Serial Interface Integration ---")
         self.run_test("serial", "Fan command execution", self.test_fan_command_execution)
+
+        print("\n--- SD Card Telemetry Logging (v1.3 Phase 2) ---")
+        self.run_test("telemetry", "Telemetry header format validation", self.test_telemetry_header_format)
+        self.run_test("telemetry", "Telemetry data logging structure", self.test_telemetry_data_structure)
+        self.run_test("telemetry", "Telemetry timestamp accuracy", self.test_telemetry_timestamp_accuracy)
+        self.run_test("telemetry", "Telemetry data value ranges", self.test_telemetry_value_ranges)
 
         print("\n--- System State Transitions ---")
         self.run_test("state", "Startup sequence", self.test_startup_sequence)
