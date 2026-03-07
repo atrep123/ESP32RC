@@ -45,6 +45,53 @@
   - Total: 15 tests (up from 12), all passing
   - Covers: Builds, configs, source code, recovery, and fan feature
 
+### Test Suite Expansion (v1.2+)
+- [x] Created `unit_tests.py` (16 tests):
+  - RC signal mapping (pulse width conversion, deadband, timeout detection)
+  - Power control (PWM bounds, percentage conversion, clamping)
+  - Light thresholds and hysteresis
+  - Fan temperature mapping and hysteresis
+  - Current/voltage safety checks
+  - Time-based monitoring (recovery timeout, intervals)
+  - Edge cases and zero-division protection
+
+- [x] Created `integration_tests.py` (16 tests):
+  - RC signal to power control data flow
+  - RC signal loss with automatic failsafe
+  - Multi-channel independent control (CH1-CH4)
+  - Overcurrent detection and shutdown
+  - Automatic recovery after 5-second timeout
+  - Recovery condition validation (all must pass)
+  - Temperature-based fan control
+  - Light control with hysteresis
+  - Power monitoring (scaling, thresholds)
+  - Serial command interface
+  - System state transitions (startup, shutdown)
+
+- [x] Created `runtime_simulator_tests.py` (9 tests):
+  - 30-second normal operation cycle
+  - RC signal loss and recovery scenario
+  - Overcurrent protection with auto-recovery
+  - Temperature ramp with proportional fan response
+  - Light hysteresis around threshold
+  - 60-second steady-state stability test
+  - Rapid state changes (stress test)
+  - Serial command sequence execution
+  - Complete power-on to power-off lifecycle
+
+- [x] Created `run_all_tests.py` (orchestrator):
+  - Unified test runner for all 56 tests
+  - Comprehensive test reporting
+  - CI/CD integration ready
+  - Single-command full validation
+
+**Total Test Coverage: 56 automated tests**
+  - Build Sanity: 15 tests (compilation, config, symbols)
+  - Unit Tests: 16 tests (mathematical functions, edge cases)
+  - Integration Tests: 16 tests (component interactions)
+  - Runtime Simulator: 9 tests (system behavior over time)
+  - **All tests passing ✓**
+
 ## Known Issues (non-critical, documented for future work)
 
 ### 1. Volatile Variable Race Conditions (Minor)
