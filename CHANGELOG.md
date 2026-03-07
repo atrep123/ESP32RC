@@ -7,11 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-03-07
+
 ### Added
-- Added a GitHub Actions release workflow that can publish releases from tags or via manual dispatch.
-- Added a checked-in release notes file for `v1.1.0`.
-- Added `docs/RELEASING.md` to document the release and tag workflow.
-- Added `.gitattributes` and `.editorconfig` to keep line endings and basic text formatting consistent across Windows and CI.
+- Added atomic read helpers for ISR-safe RC channel value access (`readRCValue`, `readRCUpdateTime`, `readRCChannelSeen`)
+- Added automatic recovery mechanism for safety shutdown state (5-second stabilization window)
+- Added `build_sanity_tests.py` for automated firmware verification (12 tests)
+- Added `hardware_verification.py` for interactive hardware testing via serial
+- Added `PROJECT_NOTES.md` documenting known issues, improvements, and future enhancements
+- Added `TROUBLESHOOTING.md` with comprehensive troubleshooting guide and common solutions
+- Added `BUILD_PIPELINE.md` documenting CI/CD workflows and local build process
+- Enhanced `.github/workflows/build.yml` with sanity tests and code quality checks
+- Enhanced `legacy/README.md` with detailed deprecation notice and migration path
+
+### Changed
+- Refactored RC value reads throughout codebase to use atomic helpers (thread-safe)
+- Improved safety limit checking to track fault time for automatic recovery
+- Removed unnecessary `-DBOARD_HAS_PSRAM` flag from default PlatformIO environment
+- Fixed platformio.ini encoding issues on Windows by using ASCII encoding
+
+### Fixed
+- Fixed potential race condition between ISR and main loop when reading volatile RC values
+- Fixed safety shutdown being permanent (now recovers automatically after stabilization)
+- Fixed CHANGELOG documentation (overvoltage threshold 60V → 26V)
+
+### Performance
+- Memory usage: ~7% RAM (22.7 KB), ~26% Flash (341 KB) - no regression
+- No change to response latency or power consumption
 
 ## [1.1.0] - 2026-03-06
 

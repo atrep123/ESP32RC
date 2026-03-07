@@ -1,4 +1,4 @@
-name: Build
+name: Build and Test
 
 on:
   push:
@@ -10,7 +10,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  platformio:
+  platformio-build:
+    name: Build (${{ matrix.env }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -22,14 +23,90 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install PlatformIO Core
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Build ${{ matrix.env }}
+        run: platformio run -e ${{ matrix.env }}
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: firmware-${{ matrix.env }}
+          path: .pio/build/${{ matrix.env }}/firmware.bin
+          retention-days: 30
+
+  sanity-tests:
+    name: Sanity Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Run build sanity tests
+        run: python scripts/build_sanity_tests.py
+
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install PlatformIO
-        run: pip install platformio
+      - name: Check Python syntax
+        run: |
+          python -m py_compile scripts/*.py
+          echo "✓ Python scripts syntax OK"
 
-      - name: Build ${{ matrix.env }}
-        run: platformio run -e ${{ matrix.env }}
+      - name: Check for common issues
+        run: |
+          # Check for TODO/FIXME comments
+          if grep -r 'TODO\|FIXME' src/main.cpp include/config.h --include="*.cpp" --include="*.h"; then
+            echo "Note: TODO/FIXME comments found (not a failure)"
+          fi
+
+  test-results:
+    name: Test Summary
+    needs: [platformio-build, sanity-tests, code-quality]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          echo "Build Status:"
+          echo "- platformio-build: ${{ needs.platformio-build.result }}"
+          echo "- sanity-tests: ${{ needs.sanity-tests.result }}"
+          echo "- code-quality: ${{ needs.code-quality.result }}"
+          
+          if [[ "${{ needs.platformio-build.result }}" != "success" ]] || [[ "${{ needs.sanity-tests.result }}" != "success" ]] || [[ "${{ needs.code-quality.result }}" != "success" ]]; then
+            echo "CI Failed"
+            exit 1
+          fi
+          echo "All checks passed!"
