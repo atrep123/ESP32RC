@@ -7,13 +7,13 @@ The default firmware accepts four RC PWM channels, drives one PWM power stage pl
 
 ## Current status
 
-- **Version**: v1.2 (Release ready)
-- **Last Release**: v1.1.1 (fan control feature added)
-- Active firmware: `src/main.cpp` (~1100 lines)
+- **Version**: v1.3.0 - Precision Edition (Production Ready ✅)
+- **Last Release**: v1.3.0 (March 7, 2026)
+- Active firmware: `src/main.cpp` (~1400 lines)
 - Build target: `platformio.ini` -> `env:esp32dev`
 - Optional bring-up target: `platformio.ini` -> `env:esp32dev_selftest`
 - Configuration header: `include/config.h`
-- Test coverage: **56 tests** (15 sanity + 16 unit + 16 integration + 9 runtime)
+- Test coverage: **67 tests** (15 sanity + 19 unit + 24 integration + 9 runtime) ✅ 100% passing
 - CI/CD: GitHub Actions on every push/PR
 - Legacy reference sketches: `legacy/` contains older `.ino` files that are not part of the default PlatformIO image
 
@@ -31,6 +31,20 @@ The default firmware accepts four RC PWM channels, drives one PWM power stage pl
 - Channel-specific RC failsafe behavior
 - Serial diagnostics output with command interface
 - Serial fan control commands (`fan status`, `fan auto`, `fan off`, `fan speed X`) ✓ v1.2
+- **DS18B20 1-Wire external temperature sensor (GPIO 19, ±0.5°C precision)** ✓ v1.3.0
+  - 12-bit resolution (0.0625°C)
+  - Automatic fallback to internal ESP32 sensor
+  - Enhanced thermal stability for fan control
+- **SD card telemetry logging (CSV format)** ✓ v1.3.0
+  - Automatic SD card detection and initialization (GPIO 5, 23, 24, 18)
+  - 1000ms configurable logging interval
+  - Historical data: timestamp, power%, current, voltage, temperature, fan_speed
+  - Non-blocking operation on main control loop
+- **Web dashboard monitoring interface (WiFi AP mode)** ✓ v1.3.0
+  - WiFi Access Point: "ESP32RC-Dashboard" / "ESP32RC123"
+  - JSON API endpoint: `/api/status` (11 system state fields)
+  - HTML dashboard with 6 metric cards and 500ms auto-refresh
+  - Mobile-friendly responsive design
 
 ## Safety behavior
 
@@ -58,11 +72,14 @@ Systems above that need different voltage sensing and updated firmware limits.
 
 ## Build verification
 
-- `pio run -e esp32dev` compiles to **319 KB** (production firmware)
-- `pio run -e esp32dev_selftest` compiles to **331 KB** (self-test firmware)
+- `pio run -e esp32dev` compiles to **891 KB** (production firmware) ✅ v1.3.0
+- `pio run -e esp32dev_selftest` compiles to **902 KB** (self-test firmware) ✅ v1.3.0
+  - Previous (v1.2): 319 KB and 331 KB respectively
+  - Growth: +506 KB for WiFi stack, WebServer, HTML dashboard
+  - Flash usage: 68% of available 1.31 MB (comfortable margin for future phases)
 - Both builds verified with continuous integration
 - Zero compiler warnings
-- Full automated test suite passes
+- Full automated test suite passes: **67/67 tests** (100% ✅)
 
 ## File map
 
@@ -85,10 +102,10 @@ Systems above that need different voltage sensing and updated firmware limits.
 - `docs/DEVELOPER_GUIDE.md`: extending the system and development workflow ✓ v1.2
 
 ### Testing
-- `scripts/run_all_tests.py`: master orchestrator (56 tests in 4 suites)
+- `scripts/run_all_tests.py`: master orchestrator (67 tests in 4 suites) ✓ v1.3.0
 - `scripts/build_sanity_tests.py`: 15 build verification tests
-- `scripts/unit_tests.py`: 16 unit function tests
-- `scripts/integration_tests.py`: 16 component integration tests
+- `scripts/unit_tests.py`: 19 unit function tests (including 3 sensor tests) ✓ v1.3.0
+- `scripts/integration_tests.py`: 24 component integration tests (including 8 new tests) ✓ v1.3.0
 - `scripts/runtime_simulator_tests.py`: 9 real-time behavior tests
 - `scripts/hardware_verification.py`: interactive hardware testing tool
 - `scripts/build_metadata.py`: build information extraction
@@ -97,27 +114,28 @@ Systems above that need different voltage sensing and updated firmware limits.
 ### Reports & Issues
 - `PROJECT_NOTES.md`: known issues, enhancements, and test coverage details
 - `PROJECT_SUMMARY.md`: this file
+- `release-notes/v1.3.0.md`: v1.3.0 Precision Edition release notes ✓ v1.3.0
 - `release-notes/v1.1.1.md`: v1.1.1 release notes
 - `CHANGELOG.md`: feature history and version tracking
 
 ## Testing & Quality Assurance
 
-### Comprehensive Test Framework (56 tests)
+### Comprehensive Test Framework (67 tests)
 
 **Quick Start**:
 ```bash
-python scripts/run_all_tests.py  # Run all 56 tests in ~15 seconds
+python scripts/run_all_tests.py  # Run all 67 tests in ~25-30 seconds
 ```
 
 ### Test Pyramid
 
-| Tier | Tests | Purpose | Time |
-|------|-------|---------|------|
-| **Build Sanity** | 15 | Compilation, config, symbols | ~8s |
-| **Unit Tests** | 16 | Math functions, edge cases | ~2s |
-| **Integration** | 16 | Component interactions | ~2s |
-| **Runtime Sim** | 9 | System behavior over time | ~3s |
-| **TOTAL** | **56** | **Full coverage** | **~15s** |
+| Tier | Tests | Purpose | v1.2 | v1.3.0 | Status |
+|------|-------|---------|------|--------|--------|
+| **Build Sanity** | 15 | Compilation, config, symbols | 15 | 15 | ✅ |
+| **Unit Tests** | 19 | Math functions, edge cases, sensors | 16 | 19 | ✅ +3 sensor |
+| **Integration** | 24 | Component interactions, features | 16 | 24 | ✅ +8 new tests |
+| **Runtime Sim** | 9 | System behavior over time | 9 | 9 | ✅ |
+| **TOTAL** | **67** | **Full coverage** | **56** | **67** | **✅ +11 tests** |
 
 ### Test Coverage
 
@@ -130,6 +148,9 @@ python scripts/run_all_tests.py  # Run all 56 tests in ~15 seconds
 - **Voltage Monitoring**: 3 tests (ranges, validity)
 - **Serial Interface**: 2 tests (commands, communication)
 - **System State**: 4 tests (startup, lifecycle, transitions)
+- **DS18B20 Temperature Sensor**: 3 tests (range, precision, fallback) ✓ v1.3.0
+- **SD Card Telemetry**: 4 tests (CSV header, data format, timestamps, ranges) ✓ v1.3.0
+- **Web Dashboard**: 4 tests (JSON API, WiFi AP, HTTP endpoints, refresh) ✓ v1.3.0
 
 ### CI/CD Integration
 
